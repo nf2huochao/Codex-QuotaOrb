@@ -1,0 +1,30 @@
+:root { font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif; color: #495849; background: #bdcfa2; font-synthesis: none; text-rendering: optimizeLegibility; --cream:#ebe4d6; --sage:#bdcfa2; --apricot:#ddb480; --shadow-out:14px 16px 26px rgba(100,117,97,.34),-10px -10px 22px rgba(255,252,242,.86); --shadow-in:inset 2px 2px 5px rgba(132,137,119,.2),inset -2px -2px 5px rgba(255,255,255,.72); }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--sage); }
+button { font: inherit; }
+.app-frame { width: min(660px,calc(100vw - 24px)); margin: 24px auto; }
+.island-shell { width: 100%; display: grid; grid-template-columns: repeat(3,1fr); padding: 7px; border: 0; border-radius: 999px; background: var(--cream); color: inherit; box-shadow: var(--shadow-out),var(--shadow-in); cursor: pointer; text-align: left; transition: transform .18s ease,box-shadow .18s ease; }
+.island-shell:hover { transform: translateY(-1px); }
+.island-shell:active { transform: translateY(1px); box-shadow: 8px 10px 18px rgba(100,117,97,.26),-5px -5px 12px rgba(255,252,242,.76),var(--shadow-in); }
+.island-segment { min-width: 0; min-height: 76px; display:flex; align-items:center; justify-content:center; gap:10px; padding:10px 14px; }
+.island-segment + .island-segment { border-left:1px solid rgba(117,130,111,.17); }
+.island-segment small,.details-panel small { display:block; color:#8a9588; font-size:11px; white-space:nowrap; letter-spacing:.02em; }
+.island-segment strong { display:block; margin-top:3px; color:#495849; font-size:15px; white-space:nowrap; }
+.quota-ring { width:54px; height:54px; flex:0 0 54px; display:grid; place-items:center; border-radius:50%; background:conic-gradient(var(--ring-color) var(--quota),#d9e4d0 0); box-shadow:4px 5px 9px rgba(135,145,123,.3),-3px -3px 7px rgba(255,255,255,.72); position:relative; }
+.quota-ring::after { content:""; position:absolute; inset:6px; border-radius:50%; background:var(--cream); box-shadow:var(--shadow-in); }
+.quota-ring b { position:relative; z-index:1; font-size:14px; }
+.status-dot { width:13px; height:13px; flex:0 0 13px; border-radius:50%; background:var(--status-color); box-shadow:0 0 0 5px rgba(255,255,255,.55),2px 3px 5px rgba(129,132,116,.36); }
+.island-stale { opacity:.82; }
+.details-panel { padding:22px 24px 18px; border-radius:28px; background:var(--cream); box-shadow:var(--shadow-out),var(--shadow-in); }
+.details-panel header,.task-header { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.details-panel h1 { margin:4px 0 0; font-size:24px; color:#495849; }
+.close-button,.refresh-button,.ack-button { border:0; border-radius:999px; background:var(--cream); color:#66745f; box-shadow:4px 5px 9px rgba(135,145,123,.25),-3px -3px 7px rgba(255,255,255,.78); cursor:pointer; }
+.close-button { padding:8px 14px; }
+.detail-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:20px 0 14px; }
+.detail-grid>div { padding:12px; border-radius:16px; background:rgba(255,255,255,.2); box-shadow:var(--shadow-in); }
+.detail-grid strong { display:block; margin-top:5px; font-size:14px; }
+.freshness { margin:10px 0 18px; font-size:12px; color:#75806f; }.freshness.stale,.freshness.error,.freshness.unauthenticated { color:#aa665b; }
+.task-header { margin-bottom:8px; font-size:13px; }.task-header span { color:#8a9588; font-size:12px; }
+.task-list { list-style:none; padding:0; margin:0; }.task-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid rgba(117,130,111,.12); }.task-copy { flex:1; min-width:0; }.task-copy strong,.task-copy small { display:block; }.task-copy strong { font-size:13px; }.task-copy small { margin-top:3px; color:#8a9588; font-size:11px; }.task-acknowledged { opacity:.55; }.ack-button { padding:6px 10px; font-size:11px; }.empty-task { padding:14px 0; color:#8a9588; font-size:13px; }
+.refresh-button { display:block; margin:16px auto 0; padding:9px 18px; background:var(--sage); color:#4b5d4b; }
+@media (max-width:560px) { .app-frame { width:calc(100vw - 16px); margin:12px auto; }.island-segment { min-height:68px; padding:8px 8px; gap:7px; }.island-segment strong { font-size:12px; }.quota-ring { width:48px;height:48px;flex-basis:48px; }.detail-grid { grid-template-columns:repeat(2,1fr); }.details-panel { padding:18px; } }

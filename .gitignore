@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.tauri/
+target/
+.codex-research/
+.superpowers/
+screenshots/
+*.local
