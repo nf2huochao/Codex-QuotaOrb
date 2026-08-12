@@ -36,3 +36,4 @@ jobs:
           releaseBody: Windows 自动更新版本。
           releaseDraft: false
           prerelease: false
+          includeUpdaterJson: true
