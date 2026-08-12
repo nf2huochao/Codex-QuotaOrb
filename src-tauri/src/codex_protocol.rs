@@ -21,7 +21,19 @@ pub struct RateLimitResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UsageResponse { pub today_tokens: Option<u64> }
+pub struct UsageResponse {
+    pub today_tokens: Option<u64>,
+    pub usage_date: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadSummary {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub updated_at: i64,
+    pub path: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NormalizedTaskEvent {
@@ -34,41 +46,287 @@ pub struct NormalizedTaskEvent {
     pub updated_at: i64,
 }
 
-fn payload(value: Value) -> Value { value.get("result").cloned().unwrap_or(value) }
-fn as_i64(value: Option<&Value>) -> Option<i64> { value.and_then(Value::as_i64).or_else(|| value.and_then(Value::as_u64).map(|v| v as i64)) }
-fn as_u64(value: Option<&Value>) -> Option<u64> { value.and_then(Value::as_u64).or_else(|| value.and_then(Value::as_i64).map(|v| v.max(0) as u64)) }
+fn payload(value: Value) -> Value {
+    value.get("result").cloned().unwrap_or(value)
+}
+fn as_i64(value: Option<&Value>) -> Option<i64> {
+    value
+        .and_then(Value::as_i64)
+        .or_else(|| value.and_then(Value::as_u64).map(|v| v as i64))
+}
+fn as_u64(value: Option<&Value>) -> Option<u64> {
+    value
+        .and_then(Value::as_u64)
+        .or_else(|| value.and_then(Value::as_i64).map(|v| v.max(0) as u64))
+}
 
 pub fn parse_rate_limits(input: &str) -> Result<RateLimitResponse, ProtocolError> {
     let root = payload(serde_json::from_str(input)?);
-    let primary = root.get("primary").or_else(|| root.get("rate_limit")).unwrap_or(&root);
-    let remaining_percent = as_u64(primary.get("remaining_percent").or_else(|| primary.get("remainingPercent")))
-        .or_else(|| as_u64(primary.get("limit")).zip(as_u64(primary.get("used"))).map(|(limit, used)| limit.saturating_sub(used) * 100 / limit.max(1)))
-        .map(|v| v.min(100) as u8);
-    let resets_at = as_i64(primary.get("resets_at").or_else(|| primary.get("reset_at")).or_else(|| primary.get("resetsAt")));
-    let credits = root.get("credits").or_else(|| root.get("reset_credits")).or_else(|| root.get("resetCredits"));
-    let reset_credits = credits.and_then(|v| v.as_u64().or_else(|| as_u64(v.get("remaining")).or_else(|| as_u64(v.get("count")))));
-    let plan = root.get("plan").or_else(|| root.get("plan_name")).and_then(Value::as_str).map(str::to_owned);
-    if remaining_percent.is_none() && resets_at.is_none() && plan.is_none() { return Err(ProtocolError::Missing("primary")); }
-    Ok(RateLimitResponse { remaining_percent, resets_at, plan, reset_credits })
+    let snapshot = root
+        .get("rateLimits")
+        .or_else(|| root.get("rate_limits"))
+        .unwrap_or(&root);
+    let primary = snapshot
+        .get("primary")
+        .or_else(|| snapshot.get("individualLimit"))
+        .or_else(|| root.get("primary"))
+        .or_else(|| root.get("rate_limit"))
+        .unwrap_or(snapshot);
+    let remaining_percent = as_u64(
+        primary
+            .get("remaining_percent")
+            .or_else(|| primary.get("remainingPercent")),
+    )
+    .or_else(|| as_u64(primary.get("usedPercent")).map(|used| 100u64.saturating_sub(used)))
+    .or_else(|| {
+        as_u64(primary.get("limit"))
+            .zip(as_u64(primary.get("used")))
+            .map(|(limit, used)| limit.saturating_sub(used) * 100 / limit.max(1))
+    })
+    .map(|v| v.min(100) as u8);
+    let resets_at = as_i64(
+        primary
+            .get("resets_at")
+            .or_else(|| primary.get("reset_at"))
+            .or_else(|| primary.get("resetsAt")),
+    );
+    let credits = root
+        .get("rateLimitResetCredits")
+        .or_else(|| root.get("credits"))
+        .or_else(|| root.get("reset_credits"))
+        .or_else(|| root.get("resetCredits"));
+    let reset_credits = credits.and_then(|v| {
+        v.as_u64()
+            .or_else(|| as_u64(v.get("remaining")).or_else(|| as_u64(v.get("count"))))
+    });
+    let plan = snapshot
+        .get("planType")
+        .or_else(|| snapshot.get("plan"))
+        .or_else(|| root.get("plan"))
+        .or_else(|| root.get("plan_name"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let reset_credits =
+        reset_credits.or_else(|| credits.and_then(|v| as_u64(v.get("availableCount"))));
+    if remaining_percent.is_none() && resets_at.is_none() && plan.is_none() {
+        return Err(ProtocolError::Missing("primary"));
+    }
+    Ok(RateLimitResponse {
+        remaining_percent,
+        resets_at,
+        plan,
+        reset_credits,
+    })
 }
 
 pub fn parse_usage(input: &str) -> Result<UsageResponse, ProtocolError> {
     let root = payload(serde_json::from_str(input)?);
-    let today_tokens = as_u64(root.get("today_tokens").or_else(|| root.get("todayTokens")).or_else(|| root.get("tokens")));
-    if today_tokens.is_none() { return Err(ProtocolError::Missing("today_tokens")); }
-    Ok(UsageResponse { today_tokens })
+    let explicit = as_u64(
+        root.get("today_tokens")
+            .or_else(|| root.get("todayTokens"))
+            .or_else(|| root.get("tokens")),
+    );
+    let (today_tokens, usage_date) = if explicit.is_some() {
+        (explicit, None)
+    } else {
+        let today = time::OffsetDateTime::now_utc().date().to_string();
+        let buckets = root
+            .get("dailyUsageBuckets")
+            .and_then(Value::as_array)
+            .ok_or(ProtocolError::Missing("dailyUsageBuckets"))?;
+        let bucket = buckets
+            .iter()
+            .find(|bucket| {
+                bucket
+                    .get("startDate")
+                    .and_then(Value::as_str)
+                    .is_some_and(|date| date == today)
+            })
+            .or_else(|| {
+                buckets
+                    .iter()
+                    .filter(|bucket| bucket.get("startDate").and_then(Value::as_str).is_some())
+                    .max_by_key(|bucket| {
+                        bucket
+                            .get("startDate")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                    })
+            });
+        let usage_date = bucket
+            .and_then(|bucket| bucket.get("startDate").and_then(Value::as_str))
+            .map(str::to_owned);
+        (
+            bucket.and_then(|bucket| as_u64(bucket.get("tokens"))),
+            usage_date,
+        )
+    };
+    if today_tokens.is_none() {
+        return Err(ProtocolError::Missing("today_tokens"));
+    }
+    Ok(UsageResponse {
+        today_tokens,
+        usage_date,
+    })
+}
+
+pub fn parse_threads(input: &str) -> Result<Vec<ThreadSummary>, ProtocolError> {
+    let root = payload(serde_json::from_str(input)?);
+    let data = root
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or(ProtocolError::Missing("data"))?;
+    Ok(data
+        .iter()
+        .filter_map(|thread| {
+            let id = thread.get("id").and_then(Value::as_str)?.to_owned();
+            let title = thread
+                .get("name")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    thread.get("preview").and_then(Value::as_str).map(|value| {
+                        value
+                            .lines()
+                            .find(|line| !line.trim().is_empty())
+                            .unwrap_or("Codex 任务")
+                    })
+                })
+                .unwrap_or("Codex 任务")
+                .trim()
+                .chars()
+                .take(80)
+                .collect::<String>();
+            let status = thread
+                .get("status")
+                .and_then(|value| value.get("type"))
+                .and_then(Value::as_str)
+                .unwrap_or("notLoaded")
+                .to_owned();
+            let updated_at =
+                as_i64(thread.get("updatedAt").or_else(|| thread.get("updated_at"))).unwrap_or(0);
+            let path = thread
+                .get("path")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            Some(ThreadSummary {
+                id,
+                title,
+                status,
+                updated_at,
+                path,
+            })
+        })
+        .collect())
 }
 
 pub fn parse_event_line(input: &str) -> Result<NormalizedTaskEvent, ProtocolError> {
     let root = payload(serde_json::from_str(input)?);
-    let id = root.get("id").or_else(|| root.get("thread_id")).or_else(|| root.get("threadId")).and_then(Value::as_str).ok_or(ProtocolError::Missing("id"))?.to_owned();
-    let title = root.get("title").or_else(|| root.get("name")).and_then(Value::as_str).unwrap_or("Codex 任务").to_owned();
-    let kind = root.get("event").or_else(|| root.get("type")).and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
-    let waiting_for_user = root.get("waiting_for_user").or_else(|| root.get("waitingForUser")).and_then(Value::as_bool).unwrap_or(false)
-        || kind.contains("approval") || kind.contains("question") || kind.contains("input");
-    let completed = root.get("completed").and_then(Value::as_bool).unwrap_or(false) || kind.contains("completed") || kind.contains("done");
-    let running = root.get("running").and_then(Value::as_bool).unwrap_or(false) || kind.contains("started") || kind.contains("progress") || kind.contains("running");
-    let token_count = as_u64(root.get("token_count").or_else(|| root.get("tokenCount")).or_else(|| root.get("tokens")));
-    let updated_at = as_i64(root.get("updated_at").or_else(|| root.get("updatedAt")).or_else(|| root.get("timestamp"))).unwrap_or(0);
-    Ok(NormalizedTaskEvent { id, title, waiting_for_user, running, completed, token_count, updated_at })
+    let params = root.get("params").unwrap_or(&root);
+    let thread = params.get("thread");
+    let id = params
+        .get("id")
+        .or_else(|| params.get("thread_id"))
+        .or_else(|| params.get("threadId"))
+        .or_else(|| params.get("turnId"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            thread
+                .and_then(|value| value.get("id"))
+                .and_then(Value::as_str)
+        })
+        .ok_or(ProtocolError::Missing("id"))?
+        .to_owned();
+    let title = params
+        .get("title")
+        .or_else(|| params.get("name"))
+        .or_else(|| params.get("threadName"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            thread
+                .and_then(|value| value.get("name"))
+                .and_then(Value::as_str)
+        })
+        .unwrap_or("Codex 任务")
+        .to_owned();
+    let kind = root
+        .get("method")
+        .or_else(|| root.get("event"))
+        .or_else(|| root.get("type"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let status_type = params
+        .get("status")
+        .and_then(|value| value.get("type").unwrap_or(value).as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let waiting_for_user = params
+        .get("waiting_for_user")
+        .or_else(|| params.get("waitingForUser"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || kind.contains("approval")
+        || kind.contains("question")
+        || kind.contains("input");
+    let completed = params
+        .get("completed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || kind.contains("completed")
+        || kind.contains("done")
+        || kind.contains("closed")
+        || status_type.contains("completed")
+        || status_type.contains("idle")
+        || status_type.contains("notloaded")
+        || status_type.contains("not_loaded");
+    let running = params
+        .get("running")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || kind.contains("started")
+        || kind.contains("progress")
+        || kind.contains("running")
+        || kind.contains("tokenusage")
+        || status_type.contains("active")
+        || status_type.contains("running")
+        || status_type.contains("inprogress")
+        || status_type.contains("in_progress");
+    let token_count = as_u64(
+        params
+            .get("token_count")
+            .or_else(|| params.get("tokenCount"))
+            .or_else(|| params.get("tokens"))
+            .or_else(|| params.get("tokenUsage"))
+            .and_then(|value| {
+                if value.get("total").is_some() {
+                    value.get("total").and_then(|total| {
+                        total
+                            .get("totalTokens")
+                            .or_else(|| total.get("total_tokens"))
+                    })
+                } else if value.is_object() {
+                    value
+                        .get("totalTokens")
+                        .or_else(|| value.get("total_tokens"))
+                } else {
+                    Some(value)
+                }
+            }),
+    );
+    let updated_at = as_i64(
+        params
+            .get("updated_at")
+            .or_else(|| params.get("updatedAt"))
+            .or_else(|| params.get("timestamp")),
+    )
+    .unwrap_or(0);
+    Ok(NormalizedTaskEvent {
+        id,
+        title,
+        waiting_for_user,
+        running,
+        completed,
+        token_count,
+        updated_at,
+    })
 }

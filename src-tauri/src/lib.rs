@@ -1,78 +1,239 @@
-pub(crate) mod domain;
-pub(crate) mod codex_protocol;
 pub(crate) mod codex_client;
-pub(crate) mod snapshot_store;
-pub(crate) mod poller;
-pub(crate) mod tray;
+pub(crate) mod codex_protocol;
+pub(crate) mod diagnostics;
+pub(crate) mod domain;
 pub(crate) mod lan_server;
+pub(crate) mod poller;
+pub(crate) mod snapshot_cache;
+pub(crate) mod snapshot_store;
+pub(crate) mod tray;
 
 use snapshot_store::{empty_snapshot, SnapshotStore};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::path::Path;
+use tauri::{Emitter, Manager};
+#[cfg(desktop)]
+use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::Mutex as AsyncMutex;
-use tauri::Manager;
 
-pub struct AppState { pub store: SnapshotStore, pub client: Arc<AsyncMutex<Option<Arc<codex_client::CodexClient>>>> }
+pub struct AppState {
+    pub store: SnapshotStore,
+    pub client: Arc<AsyncMutex<Option<Arc<codex_client::CodexClient>>>>,
+    pub lan_token: Arc<String>,
+}
 
-#[tauri::command]
-fn get_snapshot(state: tauri::State<'_, AppState>) -> domain::Snapshot { state.store.current() }
-
-#[tauri::command]
-async fn refresh_now(state: tauri::State<'_, AppState>) -> Result<domain::Snapshot, String> {
-  let Some(client) = state.client.lock().await.clone() else { return Err("Codex app-server 尚未连接".into()); };
-  let previous = state.store.current();
-  Ok(poller::poll_once(&state.store, &client, &previous, now()).await)
+#[derive(serde::Serialize)]
+struct UpdateStatus {
+    current_version: String,
+    available: bool,
+    latest_version: Option<String>,
+    message: String,
 }
 
 #[tauri::command]
-fn acknowledge_task(task_id: String, state: tauri::State<'_, AppState>) -> bool { state.store.acknowledge(&task_id) }
+async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateStatus, String> {
+    #[cfg(desktop)]
+    {
+        let update = app
+            .updater()
+            .map_err(|error| format!("更新服务初始化失败：{error}"))?
+            .check()
+            .await
+            .map_err(|error| format!("检查更新失败：{error}"))?;
+        if let Some(update) = update {
+            let latest_version = update.version.clone();
+            update
+                .download_and_install(|_, _| {}, || {})
+                .await
+                .map_err(|error| format!("更新下载或验签失败：{error}"))?;
+            return Ok(UpdateStatus {
+                current_version: env!("CARGO_PKG_VERSION").into(),
+                available: true,
+                latest_version: Some(latest_version.clone()),
+                message: format!("已安装 {latest_version}，应用即将重启"),
+            });
+        }
+    }
+    Ok(UpdateStatus {
+        current_version: env!("CARGO_PKG_VERSION").into(),
+        available: false,
+        latest_version: None,
+        message: "当前已是最新版本".into(),
+    })
+}
+
+#[tauri::command]
+fn relaunch_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
+#[tauri::command]
+fn get_pairing_info(state: tauri::State<'_, AppState>) -> lan_server::PairingInfo {
+    lan_server::pairing_info(&state.lan_token)
+}
+
+#[tauri::command]
+fn get_snapshot(state: tauri::State<'_, AppState>) -> domain::Snapshot {
+    state.store.current()
+}
+
+#[tauri::command]
+async fn refresh_now(state: tauri::State<'_, AppState>) -> Result<domain::Snapshot, String> {
+    let Some(client) = state.client.lock().await.clone() else {
+        return Err("Codex app-server 尚未连接".into());
+    };
+    let previous = state.store.current();
+    let refreshed_at = now();
+    let mut snapshot = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        poller::poll_once(&state.store, &client, &previous, refreshed_at),
+    )
+    .await
+    .map_err(|_| "同步数据超时，请稍后重试".to_owned())?;
+    snapshot.changed_at = Some(refreshed_at);
+    snapshot.source = Some("manual-refresh".into());
+    Ok(snapshot)
+}
+
+#[tauri::command]
+fn acknowledge_task(task_id: String, state: tauri::State<'_, AppState>) -> bool {
+    state.store.acknowledge(&task_id)
+}
+
+#[tauri::command]
+fn set_window_expanded(
+    expanded: bool,
+    height: Option<f64>,
+    width: Option<f64>,
+    window: tauri::Window,
+) -> Result<(), String> {
+    let height = if expanded {
+        height.unwrap_or(440.0).clamp(360.0, 820.0)
+    } else {
+        height.unwrap_or(120.0).clamp(96.0, 220.0)
+    };
+    let width = width.unwrap_or(520.0).clamp(96.0, 900.0);
+    window
+        .set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }))
+        .map_err(|error| error.to_string())
+}
 #[cfg(test)]
 mod codex_client_tests;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  let (store, _) = SnapshotStore::new(empty_snapshot());
-  let client = Arc::new(AsyncMutex::new(None));
-  tauri::Builder::default()
-    .plugin(tauri_plugin_autostart::Builder::new().build())
-    .manage(AppState { store, client })
-    .invoke_handler(tauri::generate_handler![get_snapshot, refresh_now, acknowledge_task])
-    .setup(|app| {
-      tray::setup_tray(app.handle())?;
-      let state = app.state::<AppState>();
-      let store = state.store.clone();
-      let event_store = state.store.clone();
-      let _ = lan_server::spawn(store.clone());
-      let client_slot = Arc::clone(&state.client);
-      tauri::async_runtime::spawn(async move {
-        match codex_client::CodexClient::spawn(Path::new("codex.exe")).await {
-          Ok(client) => {
-            let client = Arc::new(client);
-            *client_slot.lock().await = Some(Arc::clone(&client));
-            let _ = poller::spawn_poll_loop(store, client);
-            if let Ok(event_client) = codex_client::CodexClient::spawn(Path::new("codex.exe")).await {
-              let _ = poller::spawn_event_loop(event_store, Arc::new(event_client));
+    let (store, _) = SnapshotStore::new(empty_snapshot());
+    let client = Arc::new(AsyncMutex::new(None));
+    let lan_token = Arc::new(lan_server::create_token());
+    let codex_binary = resolve_codex_binary();
+    tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+        .plugin(tauri_plugin_autostart::Builder::new().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(tauri_plugin_window_state::StateFlags::POSITION)
+                .build(),
+        )
+        .manage(AppState {
+            store,
+            client,
+            lan_token: Arc::clone(&lan_token),
+        })
+        .invoke_handler(tauri::generate_handler![
+            get_snapshot,
+            get_pairing_info,
+            check_for_updates,
+            relaunch_app,
+            refresh_now,
+            acknowledge_task,
+            set_window_expanded
+        ])
+        .setup(move |app| {
+            tray::setup_tray(app.handle())?;
+            let state = app.state::<AppState>();
+            let store = state.store.clone();
+            let cache_path = app
+                .path()
+                .app_data_dir()?
+                .join("last-successful-snapshot.json");
+            if let Some(cached) = snapshot_cache::load(&cache_path) {
+                store.publish_if_changed(cached);
             }
-          }
-          Err(error) => {
-            let mut snapshot = store.current();
-            snapshot.status = domain::DataStatus::Error;
-            snapshot.error = Some(format!("无法连接 Codex app-server: {error}"));
-            store.publish(snapshot);
-          }
-        }
-      });
-      if cfg!(debug_assertions) {
-        app.handle().plugin(
-          tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build(),
-        )?;
-      }
-      Ok(())
-    })
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+            let mut snapshot_events = state.store.subscribe();
+            let event_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                while snapshot_events.changed().await.is_ok() {
+                    let snapshot = snapshot_events.borrow().clone();
+                    if let Err(error) = snapshot_cache::save(&cache_path, &snapshot) {
+                        log::warn!("Failed to save Codex snapshot cache: {error}");
+                    }
+                    let _ = event_handle.emit("snapshot-updated", snapshot);
+                }
+            });
+            let _ = lan_server::spawn(store.clone(), lan_token);
+            let client_slot = Arc::clone(&state.client);
+            let codex_binary = codex_binary.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut retry_delay = std::time::Duration::from_secs(2);
+                loop {
+                    match codex_client::CodexClient::spawn(&codex_binary).await {
+                        Ok(client) => {
+                            let client = Arc::new(client);
+                            *client_slot.lock().await = Some(Arc::clone(&client));
+                            let _ =
+                                poller::spawn_poll_loop(store.clone(), Arc::clone(&client)).await;
+                            let _ = client.stop().await;
+                            *client_slot.lock().await = None;
+                            let mut snapshot = store.current();
+                            snapshot.status = domain::DataStatus::Stale;
+                            snapshot.error = Some("Codex app-server 已断开，正在重连…".into());
+                            store.publish_if_changed(snapshot);
+                            retry_delay = std::time::Duration::from_secs(2);
+                        }
+                        Err(error) => {
+                            let mut snapshot = store.current();
+                            snapshot.status = domain::DataStatus::Error;
+                            snapshot.error =
+                                Some(format!("无法连接 Codex app-server，正在重试… ({error})"));
+                            store.publish_if_changed(snapshot);
+                        }
+                    }
+                    tokio::time::sleep(retry_delay).await;
+                    retry_delay = (retry_delay * 2).min(std::time::Duration::from_secs(30));
+                }
+            });
+            if cfg!(debug_assertions) {
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        .build(),
+                )?;
+            }
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }
 
-fn now() -> i64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_secs() as i64).unwrap_or(0) }
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn resolve_codex_binary() -> PathBuf {
+    let mut candidates = Vec::new();
+    if let Ok(value) = std::env::var("CODEX_BINARY") {
+        candidates.push(PathBuf::from(value));
+    }
+    if let Ok(app_data) = std::env::var("APPDATA") {
+        candidates.push(PathBuf::from(app_data).join("npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe"));
+    }
+    candidates.push(PathBuf::from("codex.exe"));
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .unwrap_or_else(|| PathBuf::from("codex.exe"))
+}

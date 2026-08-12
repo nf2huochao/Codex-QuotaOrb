@@ -1,19 +1,108 @@
 import { Snapshot } from '../domain'
 import { renderTaskList } from './TaskList'
+import { MountedView } from './FloatingIsland'
 
 function formatTime(epoch?: number) { return epoch ? new Date(epoch * 1000).toLocaleString('zh-CN', { hour12: false }) : '--' }
 function value(value: unknown) { return value === undefined || value === null ? '--' : String(value) }
+function escapeHtml(value: string) { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!)) }
+function taskSignature(snapshot: Snapshot) { return snapshot.tasks.map((task) => `${task.id}:${task.status}:${task.acknowledged}:${task.title}:${task.updatedAt}:${task.tokenCount ?? ''}`).join('|') }
+function sourceLabel(source?: Snapshot['source']) { return source === 'app-server-event' ? '实时事件' : source === 'task-watch' ? '任务监听' : source === 'metrics-poll' ? '指标轮询' : source === 'full-poll' ? '完整校准' : source === 'manual-refresh' ? '手动刷新' : source === 'local-cache' ? '本地缓存' : '' }
 
-export function renderDetailsPanel(root: HTMLElement, snapshot: Snapshot, onRefresh: () => void, onAcknowledge: (taskId: string) => void, onClose: () => void): void {
+export interface MountedDetailsView extends MountedView {
+  setPairingSettingsOpen(value: boolean): void
+}
+
+export function mountDetailsPanel(
+  root: HTMLElement,
+  onRefresh: () => void,
+  onAcknowledge: (taskId: string) => void,
+  onClose: () => void,
+  pairingInfo?: { address: string; token: string },
+  onAdvance?: () => void,
+  pairingSettingsOpen = false,
+  onTogglePairing?: () => void,
+): MountedDetailsView {
   root.innerHTML = `<section class="details-panel" aria-label="额度详情">
-    <header><div><small>CODEX 额度状态</small><h1>本周剩余 ${value(snapshot.quotaRemainingPercent)}${snapshot.quotaRemainingPercent === undefined ? '' : '%'}</h1></div><button class="close-button" type="button" aria-label="收起">收起</button></header>
-    <div class="detail-grid"><div><small>下次重置</small><strong>${formatTime(snapshot.quotaResetsAt)}</strong></div><div><small>当前套餐</small><strong>${value(snapshot.plan)}</strong></div><div><small>可用重置机会</small><strong>${value(snapshot.resetCredits)}</strong></div><div><small>本日 Token</small><strong>${value(snapshot.todayTokens)}</strong></div></div>
-    <div class="freshness ${snapshot.status}">${snapshot.status === 'fresh' ? `最近更新 ${formatTime(snapshot.fetchedAt)}` : snapshot.status === 'stale' ? `数据已过期 · 最后更新于 ${formatTime(snapshot.fetchedAt)}` : snapshot.error ?? '暂时无法读取数据'}</div>
-    <div class="task-header"><strong>任务状态</strong><span>${snapshot.activeTaskCount} 个活跃任务</span></div><ul class="task-list"></ul>
-    <button class="refresh-button" type="button">立即更新</button>
+    <header class="details-drag-region" data-tauri-drag-region><div data-tauri-drag-region><small data-tauri-drag-region>CODEX 额度状态</small><h1 class="details-title" data-tauri-drag-region></h1></div><button class="close-button pairing-settings-button" type="button" aria-label="配对设置"></button></header>
+    <div class="detail-grid"><div><small>下次重置</small><strong class="reset-value"></strong></div><div><small>当前套餐</small><strong class="plan-value"></strong></div><div><small>可用重置机会</small><strong class="credits-value"></strong></div><div><small class="token-detail-label"></small><strong class="tokens-value"></strong></div></div>
+    <div class="freshness"></div>
+    <div class="pairing-settings" aria-label="配对设置" hidden></div>
+    <div class="task-header"><strong>任务状态</strong><span class="task-count"></span></div><ul class="task-list"></ul>
+    <button class="refresh-button" type="button"></button>
   </section>`
-  root.querySelector('.close-button')?.addEventListener('click', onClose)
-  root.querySelector('.refresh-button')?.addEventListener('click', onRefresh)
-  const list = root.querySelector<HTMLElement>('.task-list')!
-  renderTaskList(list, snapshot.tasks, onAcknowledge)
+
+  const panel = root.querySelector<HTMLElement>('.details-panel')!
+  const title = root.querySelector<HTMLElement>('.details-title')!
+  const resetValue = root.querySelector<HTMLElement>('.reset-value')!
+  const planValue = root.querySelector<HTMLElement>('.plan-value')!
+  const creditsValue = root.querySelector<HTMLElement>('.credits-value')!
+  const tokenDetailLabel = root.querySelector<HTMLElement>('.token-detail-label')!
+  const tokensValue = root.querySelector<HTMLElement>('.tokens-value')!
+  const freshness = root.querySelector<HTMLElement>('.freshness')!
+  const pairingSettings = root.querySelector<HTMLElement>('.pairing-settings')!
+  const pairingButton = root.querySelector<HTMLButtonElement>('.pairing-settings-button')!
+  const taskCount = root.querySelector<HTMLElement>('.task-count')!
+  const taskList = root.querySelector<HTMLElement>('.task-list')!
+  const refreshButton = root.querySelector<HTMLButtonElement>('.refresh-button')!
+  let lastTaskSignature = ''
+  let currentPairingOpen = pairingSettingsOpen
+
+  pairingButton.addEventListener('click', () => onTogglePairing?.())
+  refreshButton.addEventListener('click', onRefresh)
+  if (onAdvance) panel.addEventListener('dblclick', (event) => {
+    if ((event.target as HTMLElement).closest('button')) return
+    onAdvance()
+  })
+
+  const updatePairing = () => {
+    pairingButton.textContent = '配对设置'
+    pairingButton.setAttribute('aria-expanded', String(currentPairingOpen))
+    pairingSettings.hidden = !currentPairingOpen
+    pairingSettings.innerHTML = currentPairingOpen
+      ? pairingInfo
+        ? `<div class="pairing-card"><small>同一 Wi‑Fi 网页地址</small><code>${escapeHtml(pairingInfo.address)}</code><small>配对码只保存在本机内存中，不会发送到 Codex。</small></div>`
+        : '<div class="pairing-card"><small>配对设置</small><strong>桌面端启动后生成本机配对地址</strong></div>'
+      : ''
+  }
+  updatePairing()
+
+  return {
+    update(snapshot) {
+      title.textContent = `本周剩余 ${value(snapshot.quotaRemainingPercent)}${snapshot.quotaRemainingPercent === undefined ? '' : '%'}`
+      resetValue.textContent = formatTime(snapshot.quotaResetsAt)
+      planValue.textContent = value(snapshot.plan)
+      creditsValue.textContent = value(snapshot.resetCredits)
+      tokenDetailLabel.textContent = snapshot.usageDate ? `Token · ${snapshot.usageDate.slice(5)}` : '本日 Token'
+      tokensValue.textContent = value(snapshot.todayTokens)
+      freshness.className = `freshness ${snapshot.status}`
+      const source = sourceLabel(snapshot.source)
+      freshness.textContent = snapshot.status === 'fresh'
+        ? `已连接 · 最近更新 ${formatTime(snapshot.fetchedAt)}${source ? ` · ${source}` : ''}`
+        : snapshot.status === 'stale'
+          ? `${snapshot.error ?? '数据已过期'} · 最后成功于 ${formatTime(snapshot.fetchedAt)}${source ? ` · ${source}` : ''}`
+          : `${snapshot.error ?? '暂时无法读取数据'} · 最后成功于 ${formatTime(snapshot.fetchedAt)}`
+      taskCount.textContent = `${snapshot.activeTaskCount} 个活跃任务`
+      const signature = taskSignature(snapshot)
+      if (signature !== lastTaskSignature) {
+        renderTaskList(taskList, snapshot.tasks, onAcknowledge)
+        lastTaskSignature = signature
+      }
+    },
+    setRefreshing(value) {
+      refreshButton.disabled = value
+      refreshButton.classList.toggle('is-refreshing', value)
+      refreshButton.textContent = value ? '正在更新…' : '立即更新'
+    },
+    setPairingSettingsOpen(value) {
+      currentPairingOpen = value
+      updatePairing()
+    },
+    destroy() { root.replaceChildren() },
+  }
+}
+
+export function renderDetailsPanel(root: HTMLElement, snapshot: Snapshot, onRefresh: () => void, onAcknowledge: (taskId: string) => void, onClose: () => void, pairingInfo?: { address: string; token: string }, isRefreshing = false, onAdvance?: () => void, pairingSettingsOpen = false, onTogglePairing?: () => void): void {
+  const mounted = mountDetailsPanel(root, onRefresh, onAcknowledge, onClose, pairingInfo, onAdvance, pairingSettingsOpen, onTogglePairing)
+  mounted.update(snapshot)
+  mounted.setRefreshing(isRefreshing)
 }

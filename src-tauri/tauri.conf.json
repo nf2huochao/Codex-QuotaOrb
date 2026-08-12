@@ -1,7 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Codex 额度悬浮窗",
-  "version": "0.1.0",
+  "productName": "Codex \u989d\u5ea6\u60ac\u6d6e\u7a97",
+  "mainBinaryName": "CodexQuotaWindow",
+  "version": "0.1.4",
   "identifier": "com.codex.quota-floating-window",
   "build": {
     "frontendDist": "../dist",
@@ -13,14 +14,16 @@
     "windows": [
       {
         "label": "main",
-        "title": "Codex 额度悬浮窗",
-        "width": 660,
-        "height": 96,
-        "minWidth": 420,
-        "minHeight": 80,
+        "title": "Codex \u989d\u5ea6\u60ac\u6d6e\u7a97",
+        "width": 116,
+        "height": 116,
+        "minWidth": 96,
+        "minHeight": 96,
         "resizable": false,
         "decorations": false,
         "transparent": true,
+        "backgroundColor": "#00000000",
+        "shadow": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": true
@@ -30,13 +33,29 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "targets": ["nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY5RkQzOUM1NDFENzIyRTUKUldUbEl0ZEJ4VG45K1YzVXhtaWQyWHh6SFB0N1dCc05BVGtlNXhqdU5pdHJDejV1eXFUSXNJWU4K",
+      "endpoints": [
+        "https://github.com/nf2huochao/Codex-Floating-ball/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

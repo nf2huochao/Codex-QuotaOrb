@@ -1,38 +1,174 @@
 import './styles.css'
 import { invoke } from '@tauri-apps/api/core'
-import { DataStatus, Snapshot } from './domain'
-import { renderDetailsPanel } from './components/DetailsPanel'
-import { renderFloatingIsland } from './components/FloatingIsland'
+import { listen } from '@tauri-apps/api/event'
+import { diffSnapshot, normalizeSnapshot, Snapshot } from './domain'
+import { mountDetailsPanel, MountedDetailsView } from './components/DetailsPanel'
+import { mountFloatingBall, mountFloatingIsland, MountedView } from './components/FloatingIsland'
 
 const app = document.querySelector<HTMLMainElement>('#app')
-if (!app) throw new Error('应用根节点不存在')
+if (!app) throw new Error('app root is missing')
 
-const fallback: Snapshot = { status: 'stale', tasks: [], activeTaskCount: 0, schemaVersion: '1.0', error: '等待连接 Codex app-server' }
+const designPreview = new URLSearchParams(window.location.search).has('design-preview')
+const fallback: Snapshot = designPreview
+  ? { status: 'fresh', fetchedAt: Math.floor(Date.now() / 1000), quotaRemainingPercent: 22, todayTokens: 0, tasks: [], activeTaskCount: 0, schemaVersion: '1.0' }
+  : { status: 'stale', tasks: [], activeTaskCount: 0, schemaVersion: '1.0', error: '等待连接 Codex app-server' }
 let snapshot = fallback
-let expanded = false
+type ViewState = 'ball' | 'summary' | 'details'
+let viewState: ViewState = 'ball'
+let refreshing = false
+let pairingInfo: { address: string; token: string } | undefined
+let retryTimer: number | undefined
+let retryDelay = 1500
+let renderedViewState: ViewState | undefined
+let resizeTarget = ''
+let pairingSettingsOpen = false
+let ballView: MountedView | undefined
+let islandView: MountedView | undefined
+let detailsView: MountedDetailsView | undefined
+let snapshotQueue: Snapshot | undefined
+let snapshotQueueTimer: number | undefined
+let lastChangedAt = snapshot.changedAt ?? 0
+const REFRESH_TIMEOUT_MS = 35_000
 
-app.innerHTML = '<div class="app-frame"><div id="island-root"></div><div id="details-root" hidden></div></div>'
+app.innerHTML = '<div class="app-frame"><div id="ball-root"></div><div id="island-root" hidden></div><div id="details-root" hidden></div></div>'
+const ballRoot = document.querySelector<HTMLElement>('#ball-root')!
 const islandRoot = document.querySelector<HTMLElement>('#island-root')!
 const detailsRoot = document.querySelector<HTMLElement>('#details-root')!
 
-function render() {
-  if (expanded) {
+function resizeWindow(width: number, height: number, expanded: boolean) {
+  if (designPreview) return
+  const target = `${width}x${height}x${expanded}`
+  if (target === resizeTarget) return
+  resizeTarget = target
+  void invoke('set_window_expanded', { expanded, width, height }).catch(() => undefined)
+}
+
+function activeView(): MountedView | undefined {
+  return viewState === 'ball' ? ballView : viewState === 'summary' ? islandView : detailsView
+}
+
+function updateMountedSnapshot() {
+  activeView()?.update(snapshot)
+  if (viewState === 'details') scheduleDetailsResize()
+}
+
+function scheduleDetailsResize() {
+  if (viewState !== 'details') return
+  window.requestAnimationFrame(() => {
+    const panel = detailsRoot.querySelector<HTMLElement>('.details-panel')
+    if (panel) resizeWindow(620, panel.scrollHeight + 28, true)
+  })
+}
+
+function renderView() {
+  const entering = renderedViewState !== viewState
+  app.dataset.transition = entering ? 'enter' : 'update'
+  app.dataset.view = viewState
+  if (viewState === 'details') {
+    ballRoot.hidden = true
     islandRoot.hidden = true
     detailsRoot.hidden = false
-    renderDetailsPanel(detailsRoot, snapshot, refresh, acknowledge, () => { expanded = false; render() })
-  } else {
+    if (!detailsView) {
+      detailsView = mountDetailsPanel(detailsRoot, refresh, acknowledge, () => { viewState = 'summary'; renderView() }, pairingInfo, () => { viewState = 'ball'; renderView() }, pairingSettingsOpen, () => {
+        pairingSettingsOpen = !pairingSettingsOpen
+        detailsView?.setPairingSettingsOpen(pairingSettingsOpen)
+        scheduleDetailsResize()
+      })
+    }
+    detailsView.update(snapshot)
+    detailsView.setRefreshing(refreshing)
+    if (entering) scheduleDetailsResize()
+  } else if (viewState === 'summary') {
+    ballRoot.hidden = true
     islandRoot.hidden = false
     detailsRoot.hidden = true
-    renderFloatingIsland(islandRoot, snapshot, () => { expanded = true; render() })
+    if (!islandView) islandView = mountFloatingIsland(islandRoot, () => { viewState = 'details'; renderView() })
+    islandView.update(snapshot)
+    if (entering) resizeWindow(520, 120, false)
+  } else {
+    ballRoot.hidden = false
+    islandRoot.hidden = true
+    detailsRoot.hidden = true
+    if (!ballView) ballView = mountFloatingBall(ballRoot, () => { viewState = 'summary'; renderView() })
+    ballView.update(snapshot)
+    if (entering) resizeWindow(116, 116, false)
   }
+  renderedViewState = viewState
+}
+
+function applySnapshot(next: Snapshot) {
+  if (next.changedAt !== undefined && next.changedAt < lastChangedAt) return
+  const changes = diffSnapshot(snapshot, next)
+  if (Object.keys(changes).length === 0) return
+  snapshot = next
+  if (next.changedAt !== undefined) lastChangedAt = Math.max(lastChangedAt, next.changedAt)
+  updateMountedSnapshot()
+}
+
+function queueSnapshot(input: unknown) {
+  const next = normalizeSnapshot(input)
+  if (next.changedAt !== undefined && next.changedAt < lastChangedAt) return
+  if (!snapshotQueue || (next.changedAt ?? 0) >= (snapshotQueue.changedAt ?? 0)) snapshotQueue = next
+  if (snapshotQueueTimer !== undefined) return
+  snapshotQueueTimer = window.setTimeout(() => {
+    snapshotQueueTimer = undefined
+    if (snapshotQueue) applySnapshot(snapshotQueue)
+    snapshotQueue = undefined
+  }, 150)
 }
 
 async function refresh() {
-  try { snapshot = await invoke<Snapshot>('refresh_now') } catch { try { snapshot = await invoke<Snapshot>('get_snapshot') } catch { snapshot = { ...snapshot, status: snapshot.status === 'fresh' ? 'error' : snapshot.status, error: '桌面端尚未连接 Codex app-server' } } }
-  render()
+  if (designPreview || refreshing) return
+  refreshing = true
+  activeView()?.setRefreshing(true)
+  if (!pairingInfo) {
+    try { pairingInfo = await invoke<typeof pairingInfo>('get_pairing_info') } catch { /* web preview */ }
+  }
+  try {
+    const refreshed = await Promise.race([
+      invoke<unknown>('refresh_now'),
+      new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error('refresh-timeout')), REFRESH_TIMEOUT_MS)),
+    ])
+    applySnapshot(normalizeSnapshot(refreshed))
+    retryDelay = 1500
+    if (retryTimer !== undefined) { window.clearTimeout(retryTimer); retryTimer = undefined }
+  } catch (error) {
+    try { applySnapshot(normalizeSnapshot(await invoke<unknown>('get_snapshot'))) } catch {
+      const timedOut = error instanceof Error && error.message === 'refresh-timeout'
+      applySnapshot({ ...snapshot, status: snapshot.status === 'fresh' ? 'error' : snapshot.status, error: timedOut ? '同步数据超时，请稍后重试' : '桌面端尚未连接 Codex app-server' })
+    }
+    if (retryTimer === undefined && snapshot.status !== 'fresh') {
+      retryTimer = window.setTimeout(() => { retryTimer = undefined; void refresh() }, retryDelay)
+      retryDelay = Math.min(retryDelay * 2, 30_000)
+    }
+  }
+  refreshing = false
+  activeView()?.setRefreshing(false)
 }
-async function acknowledge(taskId: string) { try { await invoke('acknowledge_task', { taskId }) } catch { const task = snapshot.tasks.find((item) => item.id === taskId); if (task) task.acknowledged = true } render() }
 
-render()
-void refresh()
-window.setInterval(refresh, 120_000)
+async function acknowledge(taskId: string) {
+  try { await invoke('acknowledge_task', { taskId }) } catch {
+    const task = snapshot.tasks.find((item) => item.id === taskId)
+    if (task) applySnapshot({ ...snapshot, tasks: snapshot.tasks.map((item) => item.id === taskId ? { ...item, acknowledged: true } : item) })
+  }
+}
+
+// A small test bridge uses the same coalesced path as Tauri events in design preview.
+;(window as Window & { __codexTestApplySnapshot?: (value: unknown) => void }).__codexTestApplySnapshot = queueSnapshot
+
+renderView()
+if (!designPreview) {
+  void refresh()
+  void listen<Snapshot>('snapshot-updated', (event) => queueSnapshot(event.payload))
+  void listen('refresh-requested', () => { void refresh() })
+  void listen('update-check-requested', async () => {
+    try {
+      const result = await invoke<{ message: string; available: boolean }>('check_for_updates')
+      window.alert(result.message)
+      if (result.available) await invoke('relaunch_app')
+    } catch {
+      window.alert('Update check is unavailable in web preview')
+    }
+  })
+  window.setInterval(refresh, 120_000)
+}

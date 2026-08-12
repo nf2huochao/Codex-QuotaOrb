@@ -1,5 +1,74 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#bdcfa2"><link rel="manifest" href="/manifest.webmanifest"><title>Codex 额度悬浮窗</title><style>
-:root{font-family:system-ui,"Microsoft YaHei",sans-serif;color:#495849;background:#bdcfa2}*{box-sizing:border-box}body{margin:0;padding:20px 12px}.shell{max-width:660px;margin:auto}.island{display:grid;grid-template-columns:repeat(3,1fr);padding:7px;border-radius:999px;background:#ebe4d6;box-shadow:14px 16px 26px #64756156,-10px -10px 22px #fffcefd9,inset 2px 2px 5px #84897733}.seg{min-width:0;min-height:76px;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 12px}.seg+.seg{border-left:1px solid #75826f2b}small{display:block;color:#8a9588;font-size:11px;white-space:nowrap}strong{display:block;margin-top:4px;font-size:15px;white-space:nowrap}.ring{width:54px;height:54px;display:grid;place-items:center;flex:0 0 54px;border-radius:50%;background:conic-gradient(#ddb480 var(--p),#d9e4d0 0);box-shadow:4px 5px 9px #87917b4d,-3px -3px 7px #fffec4}.ring:after{content:"";position:absolute;width:42px;height:42px;border-radius:50%;background:#ebe4d6;box-shadow:inset 2px 2px 5px #84897733}.ring b{position:relative;z-index:1}.dot{width:13px;height:13px;border-radius:50%;background:var(--c);box-shadow:0 0 0 5px #fff8,2px 3px 5px #8184745c}.details{margin-top:16px;padding:18px 20px;border-radius:24px;background:#ebe4d6;box-shadow:14px 16px 26px #64756156,-10px -10px 22px #fffcefd9}.details h1{margin:4px 0 16px;font-size:22px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.card{padding:11px;border-radius:15px;box-shadow:inset 2px 2px 5px #84897733}.fresh{margin:14px 0;color:#788474;font-size:12px}.task{padding:9px 0;border-top:1px solid #75826f22;font-size:13px}.task span{color:#8a9588;font-size:11px}@media(max-width:560px){.seg{padding:8px 6px;gap:6px}.seg strong{font-size:12px}.ring{width:48px;height:48px;flex-basis:48px}.ring:after{width:36px;height:36px}}
-</style></head><body><main class="shell"><section id="island" class="island"><div class="seg">加载中…</div><div class="seg"></div><div class="seg"></div></section><section id="details" class="details"><h1>Codex 额度详情</h1><div class="grid"></div><div class="fresh"></div><div id="tasks"></div></section></main><script>
-const island=document.querySelector('#island'),details=document.querySelector('#details');const esc=s=>String(s??'--').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const color={none:'#a8ada3',needs_action:'#c96e63',running:'#d6a85e',completed:'#87a56e'};function render(s){const pct=s.quota_remaining_percent,active=(s.tasks||[]).filter(t=>!t.acknowledged&&(t.status==='running'||t.status==='needs_action')).length,st=(s.tasks||[]).find(t=>t.status==='needs_action')?.status||(s.tasks||[]).find(t=>t.status==='running')?.status||'none';island.innerHTML=`<div class="seg"><span class="ring" style="--p:${pct??0}%"><b>${pct===undefined?'--':pct+'%'}</b></span><span><small>本周剩余</small><strong>${s.status==='fresh'?'额度可用':'数据待确认'}</strong></span></div><div class="seg"><span class="dot" style="--c:${color[st]}"></span><span><small>任务状态</small><strong>${active?active+' 个任务执行中':'无活跃任务'}</strong></span></div><div class="seg"><span><small>本日 Token</small><strong>${s.today_tokens===undefined?'--':s.today_tokens>=1000?(s.today_tokens/1000).toFixed(1)+'K':s.today_tokens}</strong></span></div>`;const fmt=x=>x?new Date(x*1000).toLocaleString('zh-CN',{hour12:false}):'--';details.querySelector('h1').textContent='本周剩余 '+(pct===undefined?'--':pct+'%');details.querySelector('.grid').innerHTML=`<div class="card"><small>下次重置</small><strong>${fmt(s.quota_resets_at)}</strong></div><div class="card"><small>当前套餐</small><strong>${esc(s.plan)}</strong></div><div class="card"><small>可用重置机会</small><strong>${esc(s.reset_credits)}</strong></div><div class="card"><small>本日 Token</small><strong>${esc(s.today_tokens)}</strong></div>`;details.querySelector('.fresh').textContent=s.status==='fresh'?'最近更新 '+fmt(s.fetched_at):(s.status==='stale'?'数据已过期 · 最后更新于 '+fmt(s.fetched_at):(s.error||'暂时无法读取数据'));document.querySelector('#tasks').innerHTML=(s.tasks||[]).map(t=>`<div class="task"><i class="dot" style="--c:${color[t.status]}"></i> ${esc(t.title)}<span> · ${esc(t.status)}</span></div>`).join('')||'<div class="task"><span>暂无任务记录</span></div>'}async function refresh(){try{const r=await fetch('/api/snapshot',{cache:'no-store'});render(await r.json())}catch(e){render({status:'error',error:'无法连接本地 Codex 服务',tasks:[]})}}refresh();setInterval(refresh,120000);
-</script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#bdcfa2">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <title>Codex 额度悬浮窗</title>
+  <style>
+    :root{font-family:system-ui,"Microsoft YaHei",sans-serif;color:#495849;background:#bdcfa2}
+    *{box-sizing:border-box}body{margin:0;padding:20px 12px}.shell{max-width:660px;margin:auto}
+    .island{display:grid;grid-template-columns:repeat(3,1fr);padding:7px;border-radius:999px;background:#ebe4d6;box-shadow:14px 16px 26px #64756156,-10px -10px 22px #fffcefd9,inset 2px 2px 5px #84897733}
+    .seg{min-width:0;min-height:76px;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 12px}.seg+.seg{border-left:1px solid #75826f2b}
+    small{display:block;color:#8a9588;font-size:11px;white-space:nowrap}strong{display:block;margin-top:4px;font-size:15px;white-space:nowrap}
+    .ring{width:54px;height:54px;display:grid;place-items:center;flex:0 0 54px;border-radius:50%;background:conic-gradient(#ddb480 var(--p),#d9e4d0 0);box-shadow:4px 5px 9px #87917b4d,-3px -3px 7px #fffec4;position:relative}.ring:after{content:"";position:absolute;inset:6px;border-radius:50%;background:#ebe4d6;box-shadow:inset 2px 2px 5px #84897733}.ring b{position:relative;z-index:1}
+    .dot{display:inline-block;width:13px;height:13px;border-radius:50%;background:var(--c);box-shadow:0 0 0 5px #fff8,2px 3px 5px #8184745c}
+    .details,.pairing{margin-top:16px;padding:18px 20px;border-radius:24px;background:#ebe4d6;box-shadow:14px 16px 26px #64756156,-10px -10px 22px #fffcefd9}.details h1{margin:4px 0 16px;font-size:22px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.card{padding:11px;border-radius:15px;box-shadow:inset 2px 2px 5px #84897733}.fresh{margin:14px 0;color:#788474;font-size:12px}.task{display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid #75826f22;font-size:13px}.task-copy{flex:1}.task span{color:#8a9588;font-size:11px}.ack,.pair-submit{border:0;border-radius:999px;background:#ebe4d6;color:#66745f;padding:7px 12px;box-shadow:4px 5px 9px #87917b40,-3px -3px 7px #fffec4;cursor:pointer}.pairing{text-align:center}.pairing p{line-height:1.65}.pairing form{display:flex;gap:8px;margin-top:16px}.pairing input{min-width:0;flex:1;border:0;border-radius:999px;padding:11px 14px;background:#f7f1e6;color:#495849;box-shadow:inset 2px 2px 5px #84897733}.pairing input:focus{outline:2px solid #ddb480}.pair-error{min-height:20px;margin:10px 0 0;color:#aa665b;font-size:12px}.pairing code{display:block;margin-top:12px;padding:10px;word-break:break-all;background:#bdcfa255;border-radius:12px}
+    @media(max-width:560px){body{padding:12px 8px}.seg{padding:8px 6px;gap:6px}.seg strong{font-size:12px}.ring{width:48px;height:48px;flex-basis:48px}.details{padding:16px}.pairing{margin-top:12vh}.pairing form{display:block}.pairing input,.pair-submit{width:100%}.pair-submit{margin-top:8px}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <noscript><section class="pairing"><h1>Codex 额度</h1><p>此页面需要开启 JavaScript 才能读取局域网快照。</p></section></noscript>
+    <section id="pairing" class="pairing" hidden>
+      <h1>等待局域网配对</h1>
+      <p>请在 Windows 悬浮窗详情中复制配对地址，或复制配对码，在此处粘贴后连接。</p>
+      <form id="pair-form"><input id="pair-input" autocomplete="off" placeholder="粘贴配对地址或 32 位配对码"><button class="pair-submit" type="submit">连接</button></form>
+      <p id="pair-error" class="pair-error"></p>
+    </section>
+    <section id="dashboard" hidden>
+      <section id="island" class="island"></section>
+      <section id="details" class="details"><h1>Codex 额度详情</h1><div class="grid"></div><div class="fresh"></div><div id="tasks"></div></section>
+    </section>
+  </main>
+  <script>
+    const query=new URLSearchParams(location.search),token=query.get('pair'),pairing=document.querySelector('#pairing'),dashboard=document.querySelector('#dashboard');
+    const color={none:'#a8ada3',needs_action:'#c96e63',running:'#d6a85e',completed:'#87a56e'};
+    let latestSnapshot,lastSignature='',reconnectTimer,reconnectDelay=1000;
+    const esc=s=>String(s??'--').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const fmt=x=>x?new Date(x*1000).toLocaleString('zh-CN',{hour12:false}):'--';
+    function goWithPair(raw){
+      const value=raw.trim();let pair=value;
+      try{const url=new URL(value,location.href);pair=url.searchParams.get('pair')||value}catch{}
+      if(!/^[a-f0-9]{32}$/i.test(pair)){document.querySelector('#pair-error').textContent='配对地址或配对码格式不正确';return}
+      location.href='/?pair='+encodeURIComponent(pair)
+    }
+    if(!token){pairing.hidden=false;document.querySelector('#pair-form').addEventListener('submit',e=>{e.preventDefault();goWithPair(document.querySelector('#pair-input').value)})}else dashboard.hidden=false;
+    function render(s){
+      const signature=JSON.stringify(s);if(signature===lastSignature)return;lastSignature=signature;latestSnapshot=s;
+      const tasks=s.tasks||[],pct=s.quota_remaining_percent,active=tasks.filter(t=>!t.acknowledged&&(t.status==='running'||t.status==='needs_action')).length,st=tasks.find(t=>!t.acknowledged&&t.status==='needs_action')?.status||tasks.find(t=>!t.acknowledged&&t.status==='completed')?.status||tasks.find(t=>!t.acknowledged&&t.status==='running')?.status||'none';
+      const completed=tasks.filter(t=>!t.acknowledged&&t.status==='completed').length,needsAction=tasks.filter(t=>!t.acknowledged&&t.status==='needs_action').length;
+      const taskText=needsAction?needsAction+' 个任务需要处理':completed?completed+' 个任务已完成':active?active+' 个任务执行中':'无活跃任务';
+      const tokenText=s.today_tokens===undefined?'--':s.today_tokens>=1000?(s.today_tokens/1000).toFixed(s.today_tokens>=1000000?0:1)+'K':s.today_tokens;
+      document.querySelector('#island').innerHTML=`<div class="seg"><span class="ring" style="--p:${pct??0}%"><b>${pct===undefined?'--':pct+'%'}</b></span><span><small>本周剩余</small><strong>${s.status==='fresh'?'额度可用':'数据待确认'}</strong></span></div><div class="seg"><span class="dot" style="--c:${color[st]}"></span><span><small>任务状态</small><strong>${taskText}</strong></span></div><div class="seg"><span><small>本日 Token</small><strong>${tokenText}</strong></span></div>`;
+      document.querySelector('#details h1').textContent='本周剩余 '+(pct===undefined?'--':pct+'%');document.querySelector('.grid').innerHTML=`<div class="card"><small>下次重置</small><strong>${fmt(s.quota_resets_at)}</strong></div><div class="card"><small>当前套餐</small><strong>${esc(s.plan)}</strong></div><div class="card"><small>可用重置机会</small><strong>${esc(s.reset_credits)}</strong></div><div class="card"><small>本日 Token</small><strong>${esc(s.today_tokens)}</strong></div>`;
+      document.querySelector('.fresh').textContent=s.status==='fresh'?'已连接 · 最近更新 '+fmt(s.fetched_at):(s.status==='stale'?(s.error||'数据已过期')+' · 最后成功于 '+fmt(s.fetched_at):(s.error||'暂时无法读取数据'));
+      document.querySelector('#tasks').innerHTML=(s.tasks||[]).map(t=>`<div class="task"><i class="dot" style="--c:${color[t.status]}"></i><span class="task-copy">${esc(t.title)}<small>${esc(t.status)}</small></span>${t.status==='completed'&&!t.acknowledged?`<button class="ack" data-id="${esc(t.id)}">已验收</button>`:''}</div>`).join('')||'<div class="task"><span>暂无任务记录</span></div>';
+      document.querySelectorAll('.ack').forEach(b=>b.onclick=()=>fetch('/api/tasks/'+encodeURIComponent(b.dataset.id)+'/acknowledge?pair='+encodeURIComponent(token),{method:'POST'}));
+    }
+    function showConnectionError(message){render(latestSnapshot?{...latestSnapshot,status:'stale',error:message}:{status:'error',error:message,tasks:[]})}
+    async function refresh(){try{const r=await fetch('/api/snapshot?pair='+encodeURIComponent(token),{cache:'no-store'});if(!r.ok)throw Error('配对码无效或服务拒绝访问');render(await r.json())}catch(e){showConnectionError(e.message||'无法连接 Windows 悬浮窗')}}
+    function connect(){
+      try{
+        const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws?pair='+encodeURIComponent(token));
+        ws.onopen=()=>{reconnectDelay=1000;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=undefined}};
+        ws.onmessage=e=>{try{render(JSON.parse(e.data))}catch{}};
+        ws.onerror=()=>ws.close();
+        ws.onclose=()=>{showConnectionError('连接已中断，正在重连');reconnectTimer=setTimeout(connect,reconnectDelay);reconnectDelay=Math.min(reconnectDelay*2,30000)};
+      }catch{reconnectTimer=setTimeout(connect,reconnectDelay);reconnectDelay=Math.min(reconnectDelay*2,30000)}
+    }
+    if(token){refresh();connect();setInterval(refresh,120000);addEventListener('online',()=>{refresh();connect()});addEventListener('offline',()=>showConnectionError('网络已断开，当前显示上次成功数据'))}
+  </script>
+</body>
+</html>

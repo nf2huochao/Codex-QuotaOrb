@@ -5,4 +5,12 @@ target/
 .codex-research/
 .superpowers/
 screenshots/
+test-results/
+playwright-report/
+tmp/
 *.local
+.env
+.env.*
+!.env.example
+*.key
+*.key.pub

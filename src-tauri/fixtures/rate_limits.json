@@ -1,1 +1,1 @@
-{"primary":{"remaining_percent":72,"resets_at":1765401600},"plan":"Plus","credits":{"remaining":1}}
+{"rateLimits":{"primary":{"usedPercent":28,"resetsAt":1765401600},"planType":"Plus"},"rateLimitResetCredits":{"availableCount":1}}
