@@ -32,8 +32,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: Codex 额度悬浮窗 ${{ github.ref_name }}
-          releaseBody: Windows 自动更新版本。
+          releaseName: Codex QuotaOrb ${{ github.ref_name }}
+          releaseBody: Windows auto-update release.
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
