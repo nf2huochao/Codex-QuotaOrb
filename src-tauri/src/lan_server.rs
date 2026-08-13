@@ -8,20 +8,36 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
-use std::{net::SocketAddr, sync::Arc};
+use std::{fs, net::SocketAddr, path::Path as FsPath, sync::{Arc, RwLock}};
 
 pub const LAN_PORT: u16 = 18765;
 
 #[derive(Clone)]
 pub struct LanState {
     pub store: SnapshotStore,
-    pub token: Arc<String>,
+    pub pairing: Arc<RwLock<PairingState>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PairingInfo {
     pub address: String,
-    pub token: String,
+    pub code: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PairingState {
+    pub code: String,
+    pub session_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PairRequest {
+    code: String,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct PairResponse {
+    token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -32,7 +48,36 @@ struct PairQuery {
 pub fn create_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
-pub fn pairing_info(token: &str) -> PairingInfo {
+pub fn create_code() -> String {
+    format!("{:04}", uuid::Uuid::new_v4().as_u128() % 10_000)
+}
+
+pub fn load_or_create(path: &FsPath) -> Result<PairingState, String> {
+    if let Ok(bytes) = fs::read(path) {
+        if let Ok(state) = serde_json::from_slice::<PairingState>(&bytes) {
+            if state.code.len() == 4
+                && state.code.chars().all(|character| character.is_ascii_digit())
+                && !state.session_token.is_empty()
+            {
+                return Ok(state);
+            }
+        }
+    }
+    let state = PairingState { code: create_code(), session_token: create_token() };
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::write(path, serde_json::to_vec_pretty(&state).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    Ok(state)
+}
+
+pub fn save(state: &PairingState, path: &FsPath) -> Result<(), String> {
+    fs::write(path, serde_json::to_vec_pretty(state).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())
+}
+
+pub fn pairing_info(state: &PairingState) -> PairingInfo {
     let host = std::net::UdpSocket::bind("0.0.0.0:0")
         .ok()
         .and_then(|socket| {
@@ -44,25 +89,26 @@ pub fn pairing_info(token: &str) -> PairingInfo {
         })
         .unwrap_or_else(|| "本机局域网IP".into());
     PairingInfo {
-        address: format!("http://{host}:{LAN_PORT}/?pair={token}"),
-        token: token.to_owned(),
+        address: format!("http://{host}:{LAN_PORT}/"),
+        code: state.code.clone(),
     }
 }
 
-pub fn router(store: SnapshotStore, token: Arc<String>) -> Router {
+pub fn router(store: SnapshotStore, pairing: Arc<RwLock<PairingState>>) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/manifest.webmanifest", get(manifest))
+        .route("/api/pair", post(pair))
         .route("/api/snapshot", get(snapshot))
         .route("/api/tasks/{id}/acknowledge", post(acknowledge))
         .route("/ws", get(websocket))
         .route("/health", get(health))
-        .with_state(LanState { store, token })
+        .with_state(LanState { store, pairing })
 }
 
-pub fn spawn(store: SnapshotStore, token: Arc<String>) -> tauri::async_runtime::JoinHandle<()> {
+pub fn spawn(store: SnapshotStore, pairing: Arc<RwLock<PairingState>>) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
-        let app = router(store, token);
+        let app = router(store, pairing);
         let address = SocketAddr::from(([0, 0, 0, 0], LAN_PORT));
         let listener = match tokio::net::TcpListener::bind(address).await {
             Ok(listener) => listener,
@@ -72,15 +118,27 @@ pub fn spawn(store: SnapshotStore, token: Arc<String>) -> tauri::async_runtime::
     })
 }
 
-fn authorized(headers: &HeaderMap, query: &PairQuery, expected: &str) -> bool {
-    if query.pair.as_deref() == Some(expected) {
+fn authorized(headers: &HeaderMap, query: &PairQuery, pairing: &PairingState) -> bool {
+    if query.pair.as_deref() == Some(pairing.session_token.as_str()) {
         return true;
     }
     headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
-        .is_some_and(|value| value == expected)
+        .is_some_and(|value| value == pairing.session_token)
+}
+
+async fn pair(State(state): State<LanState>, Json(request): Json<PairRequest>) -> Response {
+    let pairing = state.pairing.read().expect("pairing lock").clone();
+    if request.code.trim() != pairing.code {
+        return (StatusCode::UNAUTHORIZED, "配对码不正确").into_response();
+    }
+    (
+        [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
+        Json(PairResponse { token: pairing.session_token }),
+    )
+        .into_response()
 }
 
 async fn index() -> Html<&'static str> {
@@ -104,10 +162,15 @@ async fn snapshot(
     headers: HeaderMap,
     Query(query): Query<PairQuery>,
 ) -> Response {
-    if !authorized(&headers, &query, &state.token) {
+    let pairing = state.pairing.read().expect("pairing lock").clone();
+    if !authorized(&headers, &query, &pairing) {
         return (StatusCode::UNAUTHORIZED, "需要局域网配对码").into_response();
     }
-    Json(state.store.current()).into_response()
+    (
+        [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
+        Json(state.store.current()),
+    )
+        .into_response()
 }
 
 async fn acknowledge(
@@ -116,7 +179,8 @@ async fn acknowledge(
     headers: HeaderMap,
     Query(query): Query<PairQuery>,
 ) -> Response {
-    if !authorized(&headers, &query, &state.token) {
+    let pairing = state.pairing.read().expect("pairing lock").clone();
+    if !authorized(&headers, &query, &pairing) {
         return (StatusCode::UNAUTHORIZED, "需要局域网配对码").into_response();
     }
     Json(serde_json::json!({ "acknowledged": state.store.acknowledge(&id) })).into_response()
@@ -128,7 +192,8 @@ async fn websocket(
     headers: HeaderMap,
     Query(query): Query<PairQuery>,
 ) -> Response {
-    if !authorized(&headers, &query, &state.token) {
+    let pairing = state.pairing.read().expect("pairing lock").clone();
+    if !authorized(&headers, &query, &pairing) {
         return (StatusCode::UNAUTHORIZED, "需要局域网配对码").into_response();
     }
     ws.on_upgrade(move |socket| send_snapshots(socket, state.store))
@@ -198,8 +263,8 @@ mod tests {
     }
     #[tokio::test]
     async fn rejects_unpaired_snapshot() {
-        let token = Arc::new("secret".to_owned());
-        let response = router(store(), token)
+        let pairing = Arc::new(RwLock::new(PairingState { code: "1234".into(), session_token: "secret".into() }));
+        let response = router(store(), pairing)
             .oneshot(Request::get("/api/snapshot").body(Body::empty()).unwrap())
             .await
             .unwrap();
@@ -207,8 +272,8 @@ mod tests {
     }
     #[tokio::test]
     async fn paired_snapshot_is_read_only() {
-        let token = Arc::new("secret".to_owned());
-        let response = router(store(), token)
+        let pairing = Arc::new(RwLock::new(PairingState { code: "1234".into(), session_token: "secret".into() }));
+        let response = router(store(), pairing)
             .oneshot(
                 Request::get("/api/snapshot?pair=secret")
                     .body(Body::empty())
@@ -226,8 +291,8 @@ mod tests {
     #[tokio::test]
     async fn paired_ack_changes_only_local_state() {
         let store = store();
-        let token = Arc::new("secret".to_owned());
-        let response = router(store.clone(), token)
+        let pairing = Arc::new(RwLock::new(PairingState { code: "1234".into(), session_token: "secret".into() }));
+        let response = router(store.clone(), pairing)
             .oneshot(
                 Request::post("/api/tasks/done/acknowledge?pair=secret")
                     .body(Body::empty())
@@ -238,10 +303,22 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert!(store.current().tasks[0].acknowledged);
     }
+    #[tokio::test]
+    async fn four_digit_pairing_returns_session_token() {
+        let pairing = Arc::new(RwLock::new(PairingState { code: "1234".into(), session_token: "secret".into() }));
+        let response = router(store(), pairing)
+            .oneshot(Request::post("/api/pair").header("content-type", "application/json").body(Body::from(r#"{"code":"1234"}"#)).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 4096).await.unwrap();
+        assert_eq!(serde_json::from_slice::<PairResponse>(&body).unwrap().token, "secret");
+    }
+
     #[test]
-    fn pairing_info_contains_token() {
-        let info = pairing_info("abc");
-        assert!(info.address.contains("pair=abc"));
-        assert_eq!(info.token, "abc");
+    fn pairing_info_contains_code_without_long_token() {
+        let info = pairing_info(&PairingState { code: "1234".into(), session_token: "secret".into() });
+        assert!(!info.address.contains("pair="));
+        assert_eq!(info.code, "1234");
     }
 }
