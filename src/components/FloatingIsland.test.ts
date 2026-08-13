@@ -36,7 +36,7 @@ describe('compact floating island', () => {
   it('reveals pairing settings only when requested', () => {
     const root = document.createElement('div')
     const toggle = vi.fn()
-    const pairing = { address: 'http://127.0.0.1:18765/?pair=test', token: 'test' }
+    const pairing = { address: 'http://127.0.0.1:18765/', code: '1234' }
     renderDetailsPanel(root, base(), vi.fn(), vi.fn(), vi.fn(), pairing, false, undefined, false, toggle)
     expect(root.querySelector('.pairing-card')).toBeNull()
     root.querySelector<HTMLButtonElement>('.pairing-settings-button')!.click()

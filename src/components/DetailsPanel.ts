@@ -10,6 +10,7 @@ function sourceLabel(source?: Snapshot['source']) { return source === 'app-serve
 
 export interface MountedDetailsView extends MountedView {
   setPairingSettingsOpen(value: boolean): void
+  setPairingInfo(value: { address: string; code: string }): void
 }
 
 export function mountDetailsPanel(
@@ -17,10 +18,11 @@ export function mountDetailsPanel(
   onRefresh: () => void,
   onAcknowledge: (taskId: string) => void,
   onClose: () => void,
-  pairingInfo?: { address: string; token: string },
+  pairingInfo?: { address: string; code: string },
   onAdvance?: () => void,
   pairingSettingsOpen = false,
   onTogglePairing?: () => void,
+  onResetPairing?: () => void,
 ): MountedDetailsView {
   root.innerHTML = `<section class="details-panel" aria-label="额度详情">
     <header class="details-drag-region" data-tauri-drag-region><div data-tauri-drag-region><small data-tauri-drag-region>CODEX 额度状态</small><h1 class="details-title" data-tauri-drag-region></h1></div><button class="close-button pairing-settings-button" type="button" aria-label="配对设置"></button></header>
@@ -46,6 +48,7 @@ export function mountDetailsPanel(
   const refreshButton = root.querySelector<HTMLButtonElement>('.refresh-button')!
   let lastTaskSignature = ''
   let currentPairingOpen = pairingSettingsOpen
+  let currentPairingInfo = pairingInfo
 
   pairingButton.addEventListener('click', () => onTogglePairing?.())
   refreshButton.addEventListener('click', onRefresh)
@@ -59,12 +62,15 @@ export function mountDetailsPanel(
     pairingButton.setAttribute('aria-expanded', String(currentPairingOpen))
     pairingSettings.hidden = !currentPairingOpen
     pairingSettings.innerHTML = currentPairingOpen
-      ? pairingInfo
-        ? `<div class="pairing-card"><small>同一 Wi‑Fi 网页地址</small><code>${escapeHtml(pairingInfo.address)}</code><small>配对码只保存在本机内存中，不会发送到 Codex。</small></div>`
+      ? currentPairingInfo
+        ? `<div class="pairing-card"><small>同一 Wi‑Fi 网页地址</small><code>${escapeHtml(currentPairingInfo.address)}</code><small>首次打开网页输入四位配对码 <b>${escapeHtml(currentPairingInfo.code)}</b>，以后会自动记住。</small><button class="pairing-reset-button" type="button">重置配对</button></div>`
         : '<div class="pairing-card"><small>配对设置</small><strong>桌面端启动后生成本机配对地址</strong></div>'
       : ''
   }
   updatePairing()
+  pairingSettings.addEventListener('click', (event) => {
+    if ((event.target as HTMLElement).closest('.pairing-reset-button')) onResetPairing?.()
+  })
 
   return {
     update(snapshot) {
@@ -97,12 +103,16 @@ export function mountDetailsPanel(
       currentPairingOpen = value
       updatePairing()
     },
+    setPairingInfo(value) {
+      currentPairingInfo = value
+      updatePairing()
+    },
     destroy() { root.replaceChildren() },
   }
 }
 
-export function renderDetailsPanel(root: HTMLElement, snapshot: Snapshot, onRefresh: () => void, onAcknowledge: (taskId: string) => void, onClose: () => void, pairingInfo?: { address: string; token: string }, isRefreshing = false, onAdvance?: () => void, pairingSettingsOpen = false, onTogglePairing?: () => void): void {
-  const mounted = mountDetailsPanel(root, onRefresh, onAcknowledge, onClose, pairingInfo, onAdvance, pairingSettingsOpen, onTogglePairing)
+export function renderDetailsPanel(root: HTMLElement, snapshot: Snapshot, onRefresh: () => void, onAcknowledge: (taskId: string) => void, onClose: () => void, pairingInfo?: { address: string; code: string }, isRefreshing = false, onAdvance?: () => void, pairingSettingsOpen = false, onTogglePairing?: () => void, onResetPairing?: () => void): void {
+  const mounted = mountDetailsPanel(root, onRefresh, onAcknowledge, onClose, pairingInfo, onAdvance, pairingSettingsOpen, onTogglePairing, onResetPairing)
   mounted.update(snapshot)
   mounted.setRefreshing(isRefreshing)
 }

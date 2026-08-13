@@ -8,23 +8,23 @@
   <title>Codex 额度悬浮窗</title>
   <style>
     :root{font-family:system-ui,"Microsoft YaHei",sans-serif;color:#495849;background:#bdcfa2}
-    *{box-sizing:border-box}body{margin:0;padding:20px 12px}.shell{max-width:660px;margin:auto}
+    *{box-sizing:border-box}html{background:#bdcfa2;min-height:100%;overflow-x:hidden}body{margin:0;min-height:100vh;padding:20px 12px 28px;background:#bdcfa2;overflow-x:hidden}.shell{max-width:660px;margin:auto;overflow:visible}
     .island{display:grid;grid-template-columns:repeat(3,1fr);padding:7px;border-radius:999px;background:#ebe4d6;box-shadow:14px 16px 26px #64756156,-10px -10px 22px #fffcefd9,inset 2px 2px 5px #84897733}
     .seg{min-width:0;min-height:76px;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 12px}.seg+.seg{border-left:1px solid #75826f2b}
     small{display:block;color:#8a9588;font-size:11px;white-space:nowrap}strong{display:block;margin-top:4px;font-size:15px;white-space:nowrap}
     .ring{width:54px;height:54px;display:grid;place-items:center;flex:0 0 54px;border-radius:50%;background:conic-gradient(#ddb480 var(--p),#d9e4d0 0);box-shadow:4px 5px 9px #87917b4d,-3px -3px 7px #fffec4;position:relative}.ring:after{content:"";position:absolute;inset:6px;border-radius:50%;background:#ebe4d6;box-shadow:inset 2px 2px 5px #84897733}.ring b{position:relative;z-index:1}
     .dot{display:inline-block;width:13px;height:13px;border-radius:50%;background:var(--c);box-shadow:0 0 0 5px #fff8,2px 3px 5px #8184745c}
-    .details,.pairing{margin-top:16px;padding:18px 20px;border-radius:24px;background:#ebe4d6;box-shadow:14px 16px 26px #64756156,-10px -10px 22px #fffcefd9}.details h1{margin:4px 0 16px;font-size:22px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.card{padding:11px;border-radius:15px;box-shadow:inset 2px 2px 5px #84897733}.fresh{margin:14px 0;color:#788474;font-size:12px}.task{display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid #75826f22;font-size:13px}.task-copy{flex:1}.task span{color:#8a9588;font-size:11px}.ack,.pair-submit{border:0;border-radius:999px;background:#ebe4d6;color:#66745f;padding:7px 12px;box-shadow:4px 5px 9px #87917b40,-3px -3px 7px #fffec4;cursor:pointer}.pairing{text-align:center}.pairing p{line-height:1.65}.pairing form{display:flex;gap:8px;margin-top:16px}.pairing input{min-width:0;flex:1;border:0;border-radius:999px;padding:11px 14px;background:#f7f1e6;color:#495849;box-shadow:inset 2px 2px 5px #84897733}.pairing input:focus{outline:2px solid #ddb480}.pair-error{min-height:20px;margin:10px 0 0;color:#aa665b;font-size:12px}.pairing code{display:block;margin-top:12px;padding:10px;word-break:break-all;background:#bdcfa255;border-radius:12px}
-    @media(max-width:560px){body{padding:12px 8px}.seg{padding:8px 6px;gap:6px}.seg strong{font-size:12px}.ring{width:48px;height:48px;flex-basis:48px}.details{padding:16px}.pairing{margin-top:12vh}.pairing form{display:block}.pairing input,.pair-submit{width:100%}.pair-submit{margin-top:8px}}
+    .details,.pairing{margin-top:16px;padding:18px 20px;border-radius:24px;background:#ebe4d6;box-shadow:14px 16px 26px #64756156,-10px -10px 22px #fffcefd9;overflow:hidden}.details h1{margin:4px 0 16px;font-size:22px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.card{padding:11px;border-radius:15px;box-shadow:inset 2px 2px 5px #84897733}.fresh{margin:14px 0;color:#788474;font-size:12px}.task{display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid #75826f22;font-size:13px}.task-copy{flex:1}.task span{color:#8a9588;font-size:11px}.ack,.pair-submit{border:0;border-radius:999px;background:#ebe4d6;color:#66745f;padding:7px 12px;box-shadow:4px 5px 9px #87917b40,-3px -3px 7px #fffec4;cursor:pointer}.pairing{text-align:center}.pairing p{line-height:1.65}.pairing form{display:flex;gap:8px;margin-top:16px}.pairing input{min-width:0;flex:1;border:0;border-radius:999px;padding:11px 14px;background:#f7f1e6;color:#495849;box-shadow:inset 2px 2px 5px #84897733}.pairing input:focus{outline:2px solid #ddb480}.pair-error{min-height:20px;margin:10px 0 0;color:#aa665b;font-size:12px}.pairing code{display:block;margin-top:12px;padding:10px;word-break:break-all;background:#bdcfa255;border-radius:12px}.pull-refresh{height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#66745f;font-size:12px;opacity:0;transition:height .16s ease,opacity .16s ease}.pull-refresh.is-visible{height:34px;opacity:1}
+    @media(max-width:560px){body{padding:0 8px 24px}.shell{padding-top:0}.seg{padding:8px 6px;gap:6px}.seg strong{font-size:12px}.ring{width:48px;height:48px;flex-basis:48px}.details{padding:16px}.pairing{margin-top:12vh}.pairing form{display:block}.pairing input,.pair-submit{width:100%}.pair-submit{margin-top:8px}}
   </style>
 </head>
 <body>
-  <main class="shell">
+  <main class="shell"><div id="pull-refresh" class="pull-refresh" aria-live="polite">下滑刷新</div>
     <noscript><section class="pairing"><h1>Codex 额度</h1><p>此页面需要开启 JavaScript 才能读取局域网快照。</p></section></noscript>
     <section id="pairing" class="pairing" hidden>
       <h1>等待局域网配对</h1>
-      <p>请在 Windows 悬浮窗详情中复制配对地址，或复制配对码，在此处粘贴后连接。</p>
-      <form id="pair-form"><input id="pair-input" autocomplete="off" placeholder="粘贴配对地址或 32 位配对码"><button class="pair-submit" type="submit">连接</button></form>
+      <p>请在 Windows 悬浮窗详情的“配对设置”中查看四位配对码。</p>
+      <form id="pair-form"><input id="pair-input" inputmode="numeric" maxlength="4" autocomplete="one-time-code" placeholder="输入四位配对码"><button class="pair-submit" type="submit">连接</button></form>
       <p id="pair-error" class="pair-error"></p>
     </section>
     <section id="dashboard" hidden>
@@ -33,19 +33,26 @@
     </section>
   </main>
   <script>
-    const query=new URLSearchParams(location.search),token=query.get('pair'),pairing=document.querySelector('#pairing'),dashboard=document.querySelector('#dashboard');
+    const query=new URLSearchParams(location.search),pairing=document.querySelector('#pairing'),dashboard=document.querySelector('#dashboard');
+    const storageKey='codex-pair-token:'+location.origin;
     const color={none:'#a8ada3',needs_action:'#c96e63',running:'#d6a85e',completed:'#87a56e'};
-    let latestSnapshot,lastSignature='',reconnectTimer,reconnectDelay=1000;
+    let token=localStorage.getItem(storageKey)||'',latestSnapshot,lastSignature='',reconnectTimer,reconnectDelay=1000,socket,lastChangedAt=-1,lastTransportRank=0,pullStartY=0,pulling=false;
+    const pullRefresh=document.querySelector('#pull-refresh');
     const esc=s=>String(s??'--').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const fmt=x=>x?new Date(x*1000).toLocaleString('zh-CN',{hour12:false}):'--';
-    function goWithPair(raw){
-      const value=raw.trim();let pair=value;
-      try{const url=new URL(value,location.href);pair=url.searchParams.get('pair')||value}catch{}
-      if(!/^[a-f0-9]{32}$/i.test(pair)){document.querySelector('#pair-error').textContent='配对地址或配对码格式不正确';return}
-      location.href='/?pair='+encodeURIComponent(pair)
+    function showPairing(message=''){dashboard.hidden=true;pairing.hidden=false;document.querySelector('#pair-error').textContent=message}
+    function showDashboard(){pairing.hidden=true;dashboard.hidden=false}
+    function extractCode(raw){const value=raw.trim();try{const url=new URL(value,location.href);return url.searchParams.get('pair')||value}catch{return value}}
+    async function pairWithCode(raw){
+      const code=extractCode(raw);
+      if(!/^\d{4}$/.test(code)){document.querySelector('#pair-error').textContent='请输入四位数字配对码';return}
+      const button=document.querySelector('.pair-submit');button.disabled=true;
+      try{const response=await fetch('/api/pair',{method:'POST',headers:{'content-type':'application/json','cache-control':'no-cache'},body:JSON.stringify({code})});if(!response.ok)throw Error('配对码不正确或服务未启动');const result=await response.json();token=result.token;localStorage.setItem(storageKey,token);history.replaceState(null,'',location.pathname);showDashboard();refresh();connect()}catch(error){showPairing(error.message||'配对失败')}finally{button.disabled=false}
     }
-    if(!token){pairing.hidden=false;document.querySelector('#pair-form').addEventListener('submit',e=>{e.preventDefault();goWithPair(document.querySelector('#pair-input').value)})}else dashboard.hidden=false;
-    function render(s){
+    if(!token){showPairing();document.querySelector('#pair-form').addEventListener('submit',e=>{e.preventDefault();pairWithCode(document.querySelector('#pair-input').value)})}else showDashboard();
+    function render(s,transportRank=1){
+      const changed=Number(s.changed_at??s.changedAt);
+      if(Number.isFinite(changed)){if(changed<lastChangedAt||(changed===lastChangedAt&&transportRank>0&&transportRank<lastTransportRank))return;lastChangedAt=changed;lastTransportRank=Math.max(lastTransportRank,transportRank)}
       const signature=JSON.stringify(s);if(signature===lastSignature)return;lastSignature=signature;latestSnapshot=s;
       const tasks=s.tasks||[],pct=s.quota_remaining_percent,active=tasks.filter(t=>!t.acknowledged&&(t.status==='running'||t.status==='needs_action')).length,st=tasks.find(t=>!t.acknowledged&&t.status==='needs_action')?.status||tasks.find(t=>!t.acknowledged&&t.status==='completed')?.status||tasks.find(t=>!t.acknowledged&&t.status==='running')?.status||'none';
       const completed=tasks.filter(t=>!t.acknowledged&&t.status==='completed').length,needsAction=tasks.filter(t=>!t.acknowledged&&t.status==='needs_action').length;
@@ -57,18 +64,23 @@
       document.querySelector('#tasks').innerHTML=(s.tasks||[]).map(t=>`<div class="task"><i class="dot" style="--c:${color[t.status]}"></i><span class="task-copy">${esc(t.title)}<small>${esc(t.status)}</small></span>${t.status==='completed'&&!t.acknowledged?`<button class="ack" data-id="${esc(t.id)}">已验收</button>`:''}</div>`).join('')||'<div class="task"><span>暂无任务记录</span></div>';
       document.querySelectorAll('.ack').forEach(b=>b.onclick=()=>fetch('/api/tasks/'+encodeURIComponent(b.dataset.id)+'/acknowledge?pair='+encodeURIComponent(token),{method:'POST'}));
     }
-    function showConnectionError(message){render(latestSnapshot?{...latestSnapshot,status:'stale',error:message}:{status:'error',error:message,tasks:[]})}
-    async function refresh(){try{const r=await fetch('/api/snapshot?pair='+encodeURIComponent(token),{cache:'no-store'});if(!r.ok)throw Error('配对码无效或服务拒绝访问');render(await r.json())}catch(e){showConnectionError(e.message||'无法连接 Windows 悬浮窗')}}
+    function showConnectionError(message){render(latestSnapshot?{...latestSnapshot,status:'stale',error:message}:{status:'error',error:message,tasks:[]},0)}
+    function invalidatePairing(){localStorage.removeItem(storageKey);token='';if(socket){socket.close();socket=undefined}showPairing('配对已失效，请重新输入四位配对码')}
+    async function refresh(){if(!token)return;try{const r=await fetch('/api/snapshot',{headers:{Authorization:'Bearer '+token,'cache-control':'no-cache'},cache:'no-store'});if(r.status===401){invalidatePairing();return}if(!r.ok)throw Error('服务暂时无法访问');render(await r.json(),1)}catch(e){showConnectionError(e.message||'无法连接 Windows 悬浮窗')}}
     function connect(){
+      if(!token||socket&&(socket.readyState===WebSocket.OPEN||socket.readyState===WebSocket.CONNECTING))return;
       try{
-        const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws?pair='+encodeURIComponent(token));
-        ws.onopen=()=>{reconnectDelay=1000;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=undefined}};
-        ws.onmessage=e=>{try{render(JSON.parse(e.data))}catch{}};
-        ws.onerror=()=>ws.close();
-        ws.onclose=()=>{showConnectionError('连接已中断，正在重连');reconnectTimer=setTimeout(connect,reconnectDelay);reconnectDelay=Math.min(reconnectDelay*2,30000)};
+        const current=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws?pair='+encodeURIComponent(token));socket=current;
+        current.onopen=()=>{reconnectDelay=1000;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=undefined}refresh()};
+        current.onmessage=e=>{try{render(JSON.parse(e.data),2)}catch{}};
+        current.onerror=()=>current.close();
+        current.onclose=()=>{if(socket!==current)return;socket=undefined;showConnectionError('连接已中断，正在重连');if(!reconnectTimer){reconnectTimer=setTimeout(()=>{reconnectTimer=undefined;connect()},reconnectDelay);reconnectDelay=Math.min(reconnectDelay*2,30000)}};
       }catch{reconnectTimer=setTimeout(connect,reconnectDelay);reconnectDelay=Math.min(reconnectDelay*2,30000)}
     }
     if(token){refresh();connect();setInterval(refresh,120000);addEventListener('online',()=>{refresh();connect()});addEventListener('offline',()=>showConnectionError('网络已断开，当前显示上次成功数据'))}
+    addEventListener('touchstart',e=>{if(scrollY===0&&e.touches.length===1){pullStartY=e.touches[0].clientY;pulling=true}},{passive:true});
+    addEventListener('touchmove',e=>{if(!pulling)return;const distance=Math.max(0,e.touches[0].clientY-pullStartY);if(distance>4){pullRefresh.classList.add('is-visible');pullRefresh.style.height=Math.min(70,Math.max(34,distance*.55))+'px'}},{passive:true});
+    addEventListener('touchend',()=>{if(!pulling)return;const shouldRefresh=parseFloat(getComputedStyle(pullRefresh).height)>=48;pulling=false;pullRefresh.classList.remove('is-visible');pullRefresh.style.height='';if(shouldRefresh)refresh()},{passive:true});
   </script>
 </body>
 </html>

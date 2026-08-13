@@ -16,7 +16,7 @@ let snapshot = fallback
 type ViewState = 'ball' | 'summary' | 'details'
 let viewState: ViewState = 'ball'
 let refreshing = false
-let pairingInfo: { address: string; token: string } | undefined
+let pairingInfo: { address: string; code: string } | undefined
 let retryTimer: number | undefined
 let retryDelay = 1500
 let renderedViewState: ViewState | undefined
@@ -69,10 +69,15 @@ function renderView() {
     islandRoot.hidden = true
     detailsRoot.hidden = false
     if (!detailsView) {
-      detailsView = mountDetailsPanel(detailsRoot, refresh, acknowledge, () => { viewState = 'summary'; renderView() }, pairingInfo, () => { viewState = 'ball'; renderView() }, pairingSettingsOpen, () => {
+        detailsView = mountDetailsPanel(detailsRoot, refresh, acknowledge, () => { viewState = 'summary'; renderView() }, pairingInfo, () => { viewState = 'ball'; renderView() }, pairingSettingsOpen, () => {
         pairingSettingsOpen = !pairingSettingsOpen
         detailsView?.setPairingSettingsOpen(pairingSettingsOpen)
         scheduleDetailsResize()
+      }, () => {
+        void invoke<typeof pairingInfo>('reset_pairing').then((next) => {
+          pairingInfo = next
+          detailsView?.setPairingInfo(next)
+        }).catch(() => undefined)
       })
     }
     detailsView.update(snapshot)

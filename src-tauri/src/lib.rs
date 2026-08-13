@@ -10,7 +10,7 @@ pub(crate) mod tray;
 
 use snapshot_store::{empty_snapshot, SnapshotStore};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tauri::{Emitter, Manager};
 #[cfg(desktop)]
 use tauri_plugin_updater::UpdaterExt;
@@ -19,7 +19,8 @@ use tokio::sync::Mutex as AsyncMutex;
 pub struct AppState {
     pub store: SnapshotStore,
     pub client: Arc<AsyncMutex<Option<Arc<codex_client::CodexClient>>>>,
-    pub lan_token: Arc<String>,
+    pub pairing: Arc<RwLock<lan_server::PairingState>>,
+    pub pairing_path: PathBuf,
 }
 
 #[derive(serde::Serialize)]
@@ -69,7 +70,16 @@ fn relaunch_app(app: tauri::AppHandle) {
 
 #[tauri::command]
 fn get_pairing_info(state: tauri::State<'_, AppState>) -> lan_server::PairingInfo {
-    lan_server::pairing_info(&state.lan_token)
+    let pairing = state.pairing.read().expect("pairing lock").clone();
+    lan_server::pairing_info(&pairing)
+}
+
+#[tauri::command]
+fn reset_pairing(state: tauri::State<'_, AppState>) -> Result<lan_server::PairingInfo, String> {
+    let next = lan_server::PairingState { code: lan_server::create_code(), session_token: lan_server::create_token() };
+    lan_server::save(&next, &state.pairing_path)?;
+    *state.pairing.write().expect("pairing lock") = next.clone();
+    Ok(lan_server::pairing_info(&next))
 }
 
 #[tauri::command]
@@ -124,7 +134,17 @@ mod codex_client_tests;
 pub fn run() {
     let (store, _) = SnapshotStore::new(empty_snapshot());
     let client = Arc::new(AsyncMutex::new(None));
-    let lan_token = Arc::new(lan_server::create_token());
+    let pairing_path = std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("com.codex.quota-floating-window")
+        .join("pairing.json");
+    let pairing = Arc::new(RwLock::new(
+        lan_server::load_or_create(&pairing_path).unwrap_or_else(|_| lan_server::PairingState {
+            code: lan_server::create_code(),
+            session_token: lan_server::create_token(),
+        }),
+    ));
     let codex_binary = resolve_codex_binary();
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -138,11 +158,13 @@ pub fn run() {
         .manage(AppState {
             store,
             client,
-            lan_token: Arc::clone(&lan_token),
+            pairing: Arc::clone(&pairing),
+            pairing_path,
         })
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             get_pairing_info,
+            reset_pairing,
             check_for_updates,
             relaunch_app,
             refresh_now,
@@ -171,7 +193,7 @@ pub fn run() {
                     let _ = event_handle.emit("snapshot-updated", snapshot);
                 }
             });
-            let _ = lan_server::spawn(store.clone(), lan_token);
+            let _ = lan_server::spawn(store.clone(), Arc::clone(&pairing));
             let client_slot = Arc::clone(&state.client);
             let codex_binary = codex_binary.clone();
             tauri::async_runtime::spawn(async move {
