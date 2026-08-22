@@ -40,6 +40,10 @@ describe('snapshot transport', () => {
     const snapshot = normalizeSnapshot({ task_counts: { none: 0, needs_action: 1, running: 2, completed: 3 }, tasks: [] })
     expect(taskStatusCounts(snapshot.tasks, snapshot.taskCounts)).toEqual({ none: 0, needs_action: 1, running: 2, completed: 3 })
   })
+  it('normalizes quota-only hourly history points', () => {
+    const snapshot = normalizeSnapshot({ history: [{ at: 100, quota_remaining_percent: 72, today_tokens: 999 }] })
+    expect(snapshot.history).toEqual([{ at: 100, quotaRemainingPercent: 72 }])
+  })
 })
 
 describe('snapshot diff', () => {

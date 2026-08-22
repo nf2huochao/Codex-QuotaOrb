@@ -5,6 +5,34 @@ use std::{
 };
 use tokio::sync::watch;
 
+fn local_hour_bucket(at: i64) -> Option<(i64, String)> {
+    let utc = time::OffsetDateTime::from_unix_timestamp(at).ok()?;
+    let local = utc.to_offset(time::UtcOffset::current_local_offset().ok()?);
+    let bucket = local.replace_minute(0).ok()?.replace_second(0).ok()?.replace_nanosecond(0).ok()?;
+    Some((bucket.unix_timestamp(), local.date().to_string()))
+}
+
+fn merge_hourly_history(previous: &[UsagePoint], at: Option<i64>, quota: Option<u8>) -> Vec<UsagePoint> {
+    let Some(at) = at else { return previous.to_vec() };
+    let Some(quota) = quota else { return previous.to_vec() };
+    let Some((bucket, date)) = local_hour_bucket(at) else { return previous.to_vec() };
+    let mut history: Vec<UsagePoint> = previous
+        .iter()
+        .filter(|point| local_hour_bucket(point.at).map(|(_, point_date)| point_date == date).unwrap_or(false))
+        .cloned()
+        .collect();
+    if let Some(point) = history.iter_mut().find(|point| point.at == bucket) {
+        point.quota_remaining_percent = Some(quota);
+    } else {
+        history.push(UsagePoint { at: bucket, quota_remaining_percent: Some(quota) });
+    }
+    history.sort_by_key(|point| point.at);
+    if history.len() > 24 {
+        history.drain(0..history.len() - 24);
+    }
+    history
+}
+
 #[derive(Clone)]
 pub struct SnapshotStore {
     state: Arc<Mutex<Snapshot>>,
@@ -14,19 +42,10 @@ pub struct SnapshotStore {
 
 impl SnapshotStore {
     pub fn new(mut initial: Snapshot) -> (Self, watch::Receiver<Snapshot>) {
+        initial.task_counts = crate::domain::TaskCounts::from_tasks(&initial.tasks);
+        initial.active_task_count = initial.task_counts.needs_action + initial.task_counts.running;
         if initial.status == crate::domain::DataStatus::Fresh {
-            if let Some(at) = initial.fetched_at.or(initial.changed_at) {
-                let point = UsagePoint {
-                    at,
-                    quota_remaining_percent: initial.quota_remaining_percent,
-                };
-                if initial.history.last() != Some(&point) {
-                    initial.history.push(point);
-                }
-            }
-        }
-        if initial.history.len() > 24 {
-            initial.history.drain(0..initial.history.len() - 24);
+            initial.history = merge_hourly_history(&initial.history, initial.fetched_at.or(initial.changed_at), initial.quota_remaining_percent);
         }
         let acknowledged = initial
             .tasks
@@ -73,21 +92,11 @@ impl SnapshotStore {
             .count();
         snapshot.active_task_count = active as u32;
         snapshot.task_counts = crate::domain::TaskCounts::from_tasks(&snapshot.tasks);
-        let mut history = previous_history;
-        if snapshot.status == crate::domain::DataStatus::Fresh {
-            if let Some(at) = snapshot.fetched_at.or(snapshot.changed_at) {
-                let point = UsagePoint {
-                    at,
-                    quota_remaining_percent: snapshot.quota_remaining_percent,
-                };
-                if history.last() != Some(&point) {
-                    history.push(point);
-                }
-            }
-        }
-        if history.len() > 24 {
-            history.drain(0..history.len() - 24);
-        }
+        let history = if snapshot.status == crate::domain::DataStatus::Fresh {
+            merge_hourly_history(&previous_history, snapshot.fetched_at.or(snapshot.changed_at), snapshot.quota_remaining_percent)
+        } else {
+            previous_history
+        };
         snapshot.history = history;
         snapshot
     }
@@ -128,6 +137,8 @@ impl SnapshotStore {
             .lock()
             .expect("ack lock")
             .insert(task_id.to_owned());
+        state.task_counts = crate::domain::TaskCounts::from_tasks(&state.tasks);
+        state.active_task_count = state.task_counts.needs_action + state.task_counts.running;
         let _ = self.tx.send(state.clone());
         true
     }
@@ -147,17 +158,8 @@ impl SnapshotStore {
         };
         task.waiting_reason = None;
         task.approval_request_id = None;
-        state.active_task_count = state
-            .tasks
-            .iter()
-            .filter(|task| {
-                !task.acknowledged
-                    && matches!(
-                        task.status,
-                        crate::domain::TaskStatus::Running | crate::domain::TaskStatus::NeedsAction
-                    )
-            })
-            .count() as u32;
+        state.task_counts = crate::domain::TaskCounts::from_tasks(&state.tasks);
+        state.active_task_count = state.task_counts.needs_action + state.task_counts.running;
         let _ = self.tx.send(state.clone());
         true
     }
@@ -268,5 +270,28 @@ mod tests {
         changed.today_tokens = Some(128401);
         assert!(store.publish_if_changed(changed));
         assert!(receiver.has_changed().unwrap());
+    }
+
+    #[test]
+    fn hourly_history_replaces_the_same_hour_with_latest_quota() {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let hour = now - now.rem_euclid(3600);
+        let first = merge_hourly_history(&[], Some(hour + 10), Some(80));
+        let second = merge_hourly_history(&first, Some(hour + 3500), Some(72));
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].quota_remaining_percent, Some(72));
+        assert_eq!(second[0].at, local_hour_bucket(hour + 10).unwrap().0);
+    }
+
+    #[test]
+    fn hourly_history_keeps_only_current_day_and_24_buckets() {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let hour = now - now.rem_euclid(3600);
+        let mut history = Vec::new();
+        for index in 0..30 {
+            history = merge_hourly_history(&history, Some(hour - (29 - index) * 3600), Some(index as u8));
+        }
+        assert!(history.len() <= 24);
+        assert!(history.iter().all(|point| local_hour_bucket(point.at).unwrap().1 == local_hour_bucket(hour).unwrap().1));
     }
 }
