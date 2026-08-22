@@ -44,6 +44,18 @@ describe('compact floating island', () => {
     expect(root.querySelector('[data-status="completed"]')?.textContent).toContain('1')
     expect(root.querySelector('[data-status="none"]')).toBeNull()
   })
+  it('keeps the compact count equal to details when an acknowledged task runs again', () => {
+    const root = document.createElement('div')
+    const snapshot = { ...base(), taskCounts: { none: 0, needsAction: 0, running: 1, completed: 0 }, tasks: [
+      { id: 'run-again', title: '重新运行', status: 'running' as const, updatedAt: 100, acknowledged: true },
+      { id: 'run-now', title: '当前运行', status: 'running' as const, updatedAt: 101, acknowledged: false },
+    ] }
+    renderFloatingIsland(root, snapshot, vi.fn())
+    expect(root.querySelector('[data-status="running"] b')?.textContent).toBe('2')
+    const details = document.createElement('div')
+    renderDetailsPanel(details, snapshot, vi.fn(), vi.fn(), vi.fn())
+    expect(details.querySelector('.task-count')?.textContent).toContain('2')
+  })
   it('shows gray zero only when there are no unacknowledged tasks', () => {
     const root = document.createElement('div')
     renderFloatingIsland(root, { ...base(), taskCounts: { none: 0, needsAction: 0, running: 0, completed: 0 }, tasks: [{ id: 'done', title: '已完成', status: 'completed' as const, updatedAt: 100, acknowledged: true }] }, vi.fn())

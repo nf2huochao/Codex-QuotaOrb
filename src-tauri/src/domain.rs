@@ -64,7 +64,7 @@ pub struct TaskCounts {
 impl TaskCounts {
     pub fn from_tasks(tasks: &[TaskSummary]) -> Self {
         let mut counts = Self::default();
-        for task in tasks.iter().filter(|task| !task.acknowledged) {
+        for task in tasks.iter().filter(|task| !(task.acknowledged && task.status == TaskStatus::Completed)) {
             match task.status {
                 TaskStatus::None => counts.none += 1,
                 TaskStatus::NeedsAction => counts.needs_action += 1,
@@ -184,6 +184,12 @@ mod tests {
             TaskSummary { id: "acked".into(), title: "已验收".into(), activity: None, waiting_reason: None, approval_request_id: None, status: TaskStatus::Completed, token_count: None, updated_at: 0, acknowledged: true },
         ];
         assert_eq!(TaskCounts::from_tasks(&tasks), TaskCounts { none: 1, needs_action: 1, running: 1, completed: 1 });
+    }
+
+    #[test]
+    fn task_counts_include_acknowledged_running_rows() {
+        let tasks = vec![TaskSummary { id: "run".into(), title: "重新运行".into(), activity: None, waiting_reason: None, approval_request_id: None, status: TaskStatus::Running, token_count: None, updated_at: 0, acknowledged: true }];
+        assert_eq!(TaskCounts::from_tasks(&tasks).running, 1);
     }
     #[test]
     fn snapshot_is_stale_after_fifteen_minutes() {

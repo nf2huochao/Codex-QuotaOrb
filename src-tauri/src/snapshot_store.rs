@@ -83,7 +83,7 @@ impl SnapshotStore {
             .tasks
             .iter()
             .filter(|task| {
-                !task.acknowledged
+                !(task.acknowledged && task.status == crate::domain::TaskStatus::Completed)
                     && !matches!(
                         task.status,
                         crate::domain::TaskStatus::Completed | crate::domain::TaskStatus::None

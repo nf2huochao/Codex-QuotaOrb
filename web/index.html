@@ -43,7 +43,7 @@
     const esc=s=>String(s??'--').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const fmt=x=>x?new Date(x*1000).toLocaleString('zh-CN',{hour12:false}):'--';
     const sourceLabel=source=>source==='app-server-event'?'实时事件':source==='task-watch'?'任务监听':source==='permission-hook'?'批准监听':source==='metrics-poll'?'指标轮询':source==='full-poll'?'完整校准':source==='manual-refresh'?'手动刷新':'';
-    const taskStatusCounts=tasks=>tasks.reduce((counts,task)=>{if(!task.acknowledged){const status=task.status||'none';if(status in counts)counts[status]++}return counts},{none:0,needs_action:0,running:0,completed:0});
+    const taskStatusCounts=tasks=>tasks.reduce((counts,task)=>{if(!(task.acknowledged&&task.status==='completed')){const status=task.status||'none';if(status in counts)counts[status]++}return counts},{none:0,needs_action:0,running:0,completed:0});
     const statusLabel=status=>({none:'无活跃任务',needs_action:'需要批准 / 回复 / 确认',running:'正在执行',completed:'已完成，可验收'})[status]||'状态未知';
     const formatTokens=value=>value===undefined||value===null?'--':value>=1000000?(value/1000000).toFixed(1)+'M':value>=1000?(value/1000).toFixed(value>=100000?'0':'1')+'K':String(value);
     function renderHistory(points){

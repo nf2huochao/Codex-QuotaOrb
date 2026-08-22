@@ -104,3 +104,27 @@ test('web island and details use the same complete task set', async ({ page }) =
   await expect(page.locator('.task-summary .task-count[data-status="completed"] b')).toHaveText('1')
   await expect(page.locator('#tasks .task')).toHaveCount(5)
 })
+
+test('web island count follows the visible detail task rows after a task runs again', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('codex-pair-token:http://127.0.0.1:4173', 'session-token')
+  })
+  await page.route('**/api/snapshot**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'fresh', changed_at: 100, fetched_at: 100, quota_remaining_percent: 72,
+        task_counts: { none: 0, needs_action: 0, running: 1, completed: 0 },
+        tasks: [
+          { id: 'run-again', title: '重新运行', status: 'running', acknowledged: true },
+          { id: 'run-now', title: '当前运行', status: 'running', acknowledged: false },
+        ], schema_version: '1.0',
+      }),
+    })
+  })
+  await page.goto('/web/index.html')
+  await expect(page.locator('#island .task-count[data-status="running"] b')).toHaveText('2')
+  await expect(page.locator('.task-summary .task-count[data-status="running"] b')).toHaveText('2')
+  await expect(page.locator('#tasks .task')).toHaveCount(2)
+})

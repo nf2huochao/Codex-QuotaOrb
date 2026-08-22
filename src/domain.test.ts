@@ -47,6 +47,10 @@ describe('snapshot transport', () => {
     ] })
     expect(taskStatusCounts(snapshot.tasks)).toEqual({ none: 0, needs_action: 0, running: 2, completed: 0 })
   })
+  it('counts an acknowledged task again if Codex reports it running', () => {
+    const snapshot = normalizeSnapshot({ tasks: [{ id: 'run', status: 'running', acknowledged: true }] })
+    expect(taskStatusCounts(snapshot.tasks)).toEqual({ none: 0, needs_action: 0, running: 1, completed: 0 })
+  })
   it('normalizes quota-only hourly history points', () => {
     const snapshot = normalizeSnapshot({ history: [{ at: 100, quota_remaining_percent: 72, today_tokens: 999 }] })
     expect(snapshot.history).toEqual([{ at: 100, quotaRemainingPercent: 72 }])
