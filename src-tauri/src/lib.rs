@@ -2,10 +2,13 @@ pub(crate) mod codex_client;
 pub(crate) mod codex_protocol;
 pub(crate) mod diagnostics;
 pub(crate) mod domain;
+pub(crate) mod hook_bridge;
 pub(crate) mod lan_server;
 pub(crate) mod poller;
+pub(crate) mod rollout_watcher;
 pub(crate) mod snapshot_cache;
 pub(crate) mod snapshot_store;
+pub(crate) mod task_registry;
 pub(crate) mod tray;
 
 use snapshot_store::{empty_snapshot, SnapshotStore};
@@ -21,6 +24,7 @@ pub struct AppState {
     pub client: Arc<AsyncMutex<Option<Arc<codex_client::CodexClient>>>>,
     pub pairing: Arc<RwLock<lan_server::PairingState>>,
     pub pairing_path: PathBuf,
+    pub hook_bridge: hook_bridge::HookBridge,
 }
 
 #[derive(serde::Serialize)]
@@ -106,6 +110,44 @@ async fn refresh_now(state: tauri::State<'_, AppState>) -> Result<domain::Snapsh
 }
 
 #[tauri::command]
+async fn respond_to_approval(
+    task_id: String,
+    decision: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    if !matches!(decision.as_str(), "accept" | "decline") {
+        return Err("批准决定无效".into());
+    }
+    let request_id = state
+        .store
+        .current()
+        .tasks
+        .into_iter()
+        .find(|task| task.id == task_id)
+        .and_then(|task| task.approval_request_id)
+        .ok_or_else(|| "任务当前没有待处理的批准请求".to_owned())?;
+    if request_id.starts_with("hook:") {
+        if state.hook_bridge.resolve(&request_id, &decision).await {
+            state.store.resolve_approval(&task_id, &decision);
+            return Ok(());
+        }
+        return Err("批准请求已失效或已处理".into());
+    }
+    let client = state
+        .client
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Codex app-server 尚未连接".to_owned())?;
+    client
+        .respond_to_approval(&request_id, &decision)
+        .await
+        .map_err(|error| error.to_string())?;
+    state.store.resolve_approval(&task_id, &decision);
+    Ok(())
+}
+
+#[tauri::command]
 fn acknowledge_task(task_id: String, state: tauri::State<'_, AppState>) -> bool {
     state.store.acknowledge(&task_id)
 }
@@ -134,6 +176,7 @@ mod codex_client_tests;
 pub fn run() {
     let (store, _) = SnapshotStore::new(empty_snapshot());
     let client = Arc::new(AsyncMutex::new(None));
+    let hook_bridge = hook_bridge::HookBridge::default();
     let pairing_path = std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
@@ -160,6 +203,7 @@ pub fn run() {
             client,
             pairing: Arc::clone(&pairing),
             pairing_path,
+            hook_bridge: hook_bridge.clone(),
         })
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
@@ -169,6 +213,7 @@ pub fn run() {
             relaunch_app,
             refresh_now,
             acknowledge_task,
+            respond_to_approval,
             set_window_expanded
         ])
         .setup(move |app| {
@@ -193,7 +238,12 @@ pub fn run() {
                     let _ = event_handle.emit("snapshot-updated", snapshot);
                 }
             });
-            let _ = lan_server::spawn(store.clone(), Arc::clone(&pairing));
+            let _ = lan_server::spawn(
+                store.clone(),
+                Arc::clone(&pairing),
+                Arc::clone(&state.client),
+                hook_bridge.clone(),
+            );
             let client_slot = Arc::clone(&state.client);
             let codex_binary = codex_binary.clone();
             tauri::async_runtime::spawn(async move {

@@ -5,6 +5,7 @@ use crate::{
     domain::{map_task_status, snapshot_status, Snapshot, TaskEvent, TaskStatus, TaskSummary},
     rollout_watcher::{default_root, RolloutWatcher},
     snapshot_store::SnapshotStore,
+    task_registry::TaskRegistry,
 };
 use std::{
     fs::File,
@@ -29,11 +30,9 @@ pub async fn poll_once(
     match (rate, usage) {
         (Ok(rate), Ok(usage)) => {
             let rollout_tasks = RolloutWatcher::new(default_root()).scan(now);
-            let tasks = merge_polled_tasks(
-                &previous.tasks,
-                merge_rollout_tasks(map_threads(threads, now), rollout_tasks),
-                now,
-            );
+            let mut registry = TaskRegistry::from_tasks(&previous.tasks);
+            registry.merge_sources(merge_rollout_tasks(map_threads(threads, now), rollout_tasks), now);
+            let tasks = registry.tasks();
             let active_task_count = tasks
                 .iter()
                 .filter(|task| matches!(task.status, TaskStatus::Running | TaskStatus::NeedsAction))
@@ -50,7 +49,7 @@ pub async fn poll_once(
                 today_tokens: usage.today_tokens,
                 usage_date: usage.usage_date,
                 active_task_count,
-                task_counts: crate::domain::TaskCounts::from_tasks(&tasks),
+                task_counts: registry.counts(),
                 tasks,
             error: None,
             history: previous.history.clone(),
@@ -449,7 +448,11 @@ pub fn spawn_poll_loop(
                         let method = notification.get("method").and_then(serde_json::Value::as_str).unwrap_or("");
                         if let Ok(event) = crate::codex_protocol::parse_event_line(&notification.to_string()) {
                             let mut next = previous.clone();
-                            apply_task_event(&mut next, event, now);
+                            let mut registry = TaskRegistry::from_tasks(&previous.tasks);
+                            registry.apply_event(event, now);
+                            next.tasks = registry.tasks();
+                            next.task_counts = registry.counts();
+                            next.active_task_count = next.task_counts.needs_action + next.task_counts.running;
                             next.changed_at = Some(now);
                             next.source = Some("app-server-event".into());
                             next.status = snapshot_status(next.fetched_at, now, false, client.is_connected());
@@ -488,12 +491,11 @@ pub fn spawn_poll_loop(
                         next.changed_at = Some(now);
                         next.source = Some("task-watch".into());
                         let rollout_tasks = rollout_watcher.scan(now);
-                        next.tasks = merge_polled_tasks(
-                            &previous.tasks,
-                            merge_rollout_tasks(map_threads(threads, now), rollout_tasks),
-                            now,
-                        );
-                        next.active_task_count = next.tasks.iter().filter(|task| matches!(task.status, TaskStatus::Running | TaskStatus::NeedsAction)).count() as u32;
+                        let mut registry = TaskRegistry::from_tasks(&previous.tasks);
+                        registry.merge_sources(merge_rollout_tasks(map_threads(threads, now), rollout_tasks), now);
+                        next.tasks = registry.tasks();
+                        next.task_counts = registry.counts();
+                        next.active_task_count = next.task_counts.needs_action + next.task_counts.running;
                         store.publish_if_changed(next.clone());
                         previous = store.current();
                     }
