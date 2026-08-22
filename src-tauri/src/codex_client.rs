@@ -40,6 +40,7 @@ pub struct CodexClient {
     stdin: Arc<Mutex<ChildStdin>>,
     child: Arc<Mutex<Child>>,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>,
+    pending_approvals: Arc<Mutex<HashMap<String, Value>>>,
     notifications: broadcast::Sender<Value>,
     connected: Arc<AtomicBool>,
     next_id: AtomicU64,
@@ -62,6 +63,7 @@ impl CodexClient {
         let stdin = child.stdin.take().ok_or(CodexError::ProcessExited)?;
         let stdout = child.stdout.take().ok_or(CodexError::ProcessExited)?;
         let pending = Arc::new(Mutex::new(HashMap::new()));
+        let pending_approvals = Arc::new(Mutex::new(HashMap::new()));
         let (notifications, _) = broadcast::channel(128);
         let connected = Arc::new(AtomicBool::new(true));
         let client = Self {
@@ -69,6 +71,7 @@ impl CodexClient {
             stdin: Arc::new(Mutex::new(stdin)),
             child: Arc::new(Mutex::new(child)),
             pending: Arc::clone(&pending),
+            pending_approvals: Arc::clone(&pending_approvals),
             notifications: notifications.clone(),
             connected: Arc::clone(&connected),
             next_id: AtomicU64::new(1),
@@ -77,6 +80,7 @@ impl CodexClient {
         tokio::spawn(read_loop(
             BufReader::new(stdout),
             pending,
+            pending_approvals,
             notifications,
             connected,
         ));
@@ -162,6 +166,27 @@ impl CodexClient {
     pub fn subscribe_notifications(&self) -> broadcast::Receiver<Value> {
         self.notifications.subscribe()
     }
+    pub async fn respond_to_approval(&self, approval_request_id: &str, decision: &str) -> Result<(), CodexError> {
+        if !matches!(decision, "accept" | "decline") {
+            return Err(CodexError::Response("批准决定无效".into()));
+        }
+        let request_id = self
+            .pending_approvals
+            .lock()
+            .await
+            .remove(approval_request_id)
+            .ok_or_else(|| CodexError::Response("批准请求已失效或已处理".into()))?;
+        let line = serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": { "decision": decision }
+        }))?;
+        let mut stdin = self.stdin.lock().await;
+        stdin.write_all(line.as_bytes()).await?;
+        stdin.write_all(b"\n").await?;
+        stdin.flush().await?;
+        Ok(())
+    }
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
     }
@@ -182,6 +207,7 @@ impl CodexClient {
 async fn read_loop(
     mut stdout: BufReader<tokio::process::ChildStdout>,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>,
+    pending_approvals: Arc<Mutex<HashMap<String, Value>>>,
     notifications: broadcast::Sender<Value>,
     connected: Arc<AtomicBool>,
 ) {
@@ -198,12 +224,30 @@ async fn read_loop(
                         continue;
                     }
                 };
-                if let Some(id) = value.get("id").and_then(Value::as_u64) {
+                // app-server approval prompts are JSON-RPC *requests*: they carry
+                // both `id` and `method`. Route every method-bearing message to
+                // the notification stream first, otherwise an approval prompt
+                // with a numeric id is mistaken for a response and dropped.
+                if value.get("method").is_some() {
+                    let method = value.get("method").and_then(Value::as_str).unwrap_or("");
+                    let method_name = method.to_ascii_lowercase();
+                    if method_name.contains("requestapproval")
+                        || method_name.contains("requestuserinput")
+                        || method_name.contains("elicitation/request")
+                    {
+                        if let Some(request_id) = value.get("id") {
+                            let key = request_id
+                                .as_str()
+                                .map(str::to_owned)
+                                .unwrap_or_else(|| request_id.to_string());
+                            pending_approvals.lock().await.insert(key, request_id.clone());
+                        }
+                    }
+                    let _ = notifications.send(value);
+                } else if let Some(id) = value.get("id").and_then(Value::as_u64) {
                     if let Some(sender) = pending.lock().await.remove(&id) {
                         let _ = sender.send(Ok(value));
                     }
-                } else if value.get("method").is_some() {
-                    let _ = notifications.send(value);
                 }
             }
             Err(error) => {

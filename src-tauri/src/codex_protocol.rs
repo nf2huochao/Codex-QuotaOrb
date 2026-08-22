@@ -38,7 +38,13 @@ pub struct ThreadSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NormalizedTaskEvent {
     pub id: String,
+    pub turn_id: Option<String>,
+    pub item_id: Option<String>,
+    pub request_id: Option<String>,
+    pub resolved_request_id: Option<String>,
     pub title: String,
+    pub waiting_reason: Option<String>,
+    pub approval_request_id: Option<String>,
     pub waiting_for_user: bool,
     pub running: bool,
     pub completed: bool,
@@ -228,6 +234,8 @@ pub fn parse_event_line(input: &str) -> Result<NormalizedTaskEvent, ProtocolErro
         .or_else(|| params.get("thread_id"))
         .or_else(|| params.get("threadId"))
         .or_else(|| params.get("turnId"))
+        .or_else(|| params.get("item").and_then(|item| item.get("threadId")))
+        .or_else(|| params.get("item").and_then(|item| item.get("thread_id")))
         .and_then(Value::as_str)
         .or_else(|| {
             thread
@@ -255,6 +263,33 @@ pub fn parse_event_line(input: &str) -> Result<NormalizedTaskEvent, ProtocolErro
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_ascii_lowercase();
+    let request_id = root
+        .get("id")
+        .map(|value| value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string()));
+    let approval_request_id = request_id.clone().filter(|_| {
+        kind.contains("approval") || kind.contains("requestuserinput") || kind.contains("elicitation/request")
+    });
+    let resolved_request_id = params
+        .get("requestId")
+        .or_else(|| params.get("request_id"))
+        .and_then(|value| value.as_str().map(str::to_owned).or_else(|| Some(value.to_string())))
+        .filter(|_| kind.contains("serverrequest/resolved") || kind.contains("request/resolved"));
+    let turn_id = params
+        .get("turnId")
+        .or_else(|| params.get("turn_id"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let item_id = params
+        .get("itemId")
+        .or_else(|| params.get("item_id"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let waiting_reason = params
+        .get("reason")
+        .or_else(|| params.get("message"))
+        .or_else(|| params.get("command"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let status_type = params
         .get("status")
         .and_then(|value| value.get("type").unwrap_or(value).as_str())
@@ -267,7 +302,8 @@ pub fn parse_event_line(input: &str) -> Result<NormalizedTaskEvent, ProtocolErro
         .unwrap_or(false)
         || kind.contains("approval")
         || kind.contains("question")
-        || kind.contains("input");
+        || kind.contains("input")
+        || kind.contains("elicitation/request");
     let completed = params
         .get("completed")
         .and_then(Value::as_bool)
@@ -322,7 +358,13 @@ pub fn parse_event_line(input: &str) -> Result<NormalizedTaskEvent, ProtocolErro
     .unwrap_or(0);
     Ok(NormalizedTaskEvent {
         id,
+        turn_id,
+        item_id,
+        request_id,
+        resolved_request_id,
         title,
+        waiting_reason,
+        approval_request_id,
         waiting_for_user,
         running,
         completed,

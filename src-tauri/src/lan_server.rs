@@ -53,15 +53,33 @@ struct ApprovalRequest {
     decision: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone)]
 struct PermissionHookInput {
     session_id: String,
     turn_id: String,
     model: String,
     permission_mode: String,
     tool_name: String,
-    #[allow(dead_code)]
-    tool_input: serde_json::Value,
+}
+
+fn hook_string(root: &serde_json::Value, payload: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        payload.get(*key).or_else(|| root.get(*key)).and_then(|value| value.as_str().map(str::to_owned))
+    })
+}
+
+fn parse_permission_hook_input(root: serde_json::Value) -> Result<PermissionHookInput, &'static str> {
+    let payload = root.get("payload").unwrap_or(&root);
+    let session_id = hook_string(&root, payload, &["session_id", "sessionId"]);
+    let turn_id = hook_string(&root, payload, &["turn_id", "turnId"]);
+    let session_id = session_id.or_else(|| turn_id.clone()).unwrap_or_else(|| format!("hook-session:{}", uuid::Uuid::new_v4().simple()));
+    Ok(PermissionHookInput {
+        session_id,
+        turn_id: turn_id.unwrap_or_else(|| "unknown-turn".into()),
+        model: hook_string(&root, payload, &["model", "model_name", "modelName"]).unwrap_or_else(|| "Codex".into()),
+        permission_mode: hook_string(&root, payload, &["permission_mode", "permissionMode"]).unwrap_or_else(|| "default".into()),
+        tool_name: hook_string(&root, payload, &["tool_name", "toolName", "tool"]).unwrap_or_else(|| "需要确认的操作".into()),
+    })
 }
 
 pub fn create_token() -> String {
@@ -264,7 +282,7 @@ async fn approval(
 async fn permission_hook(
     State(state): State<LanState>,
     headers: HeaderMap,
-    Json(input): Json<PermissionHookInput>,
+    Json(raw): Json<serde_json::Value>,
 ) -> Response {
     let pairing = state.pairing.read().expect("pairing lock").clone();
     let hook_token = headers
@@ -273,6 +291,10 @@ async fn permission_hook(
     if hook_token != Some(pairing.session_token.as_str()) {
         return (StatusCode::UNAUTHORIZED, "Hook 身份无效").into_response();
     }
+    let input = match parse_permission_hook_input(raw) {
+        Ok(input) => input,
+        Err(error) => return (StatusCode::BAD_REQUEST, error).into_response(),
+    };
     let request_id = format!("hook:{}", uuid::Uuid::new_v4().simple());
     let receiver = state.hook_bridge.register(request_id.clone()).await;
     let reason = format!(
@@ -493,5 +515,26 @@ mod tests {
         let info = pairing_info(&PairingState { code: "1234".into(), session_token: "secret".into() });
         assert!(!info.address.contains("pair="));
         assert_eq!(info.code, "1234");
+    }
+
+    #[test]
+    fn permission_hook_accepts_wrapped_camel_case_payload() {
+        let input = parse_permission_hook_input(serde_json::json!({
+            "payload": {
+                "sessionId": "thread-camel",
+                "turnId": "turn-camel",
+                "toolName": "exec",
+                "permissionMode": "default"
+            }
+        })).unwrap();
+        assert_eq!(input.session_id, "thread-camel");
+        assert_eq!(input.turn_id, "turn-camel");
+        assert_eq!(input.tool_name, "exec");
+    }
+
+    #[test]
+    fn permission_hook_uses_turn_id_when_session_id_is_missing() {
+        let input = parse_permission_hook_input(serde_json::json!({ "turn_id": "turn-only" })).unwrap();
+        assert_eq!(input.session_id, "turn-only");
     }
 }

@@ -743,6 +743,10 @@ mod tests {
             &mut snapshot,
             NormalizedTaskEvent {
                 id: "thread-approval".into(),
+                turn_id: Some("turn-approval".into()),
+                item_id: Some("item-approval".into()),
+                request_id: Some("41".into()),
+                resolved_request_id: None,
                 title: "Codex 任务".into(),
                 waiting_reason: Some("需要批准命令".into()),
                 approval_request_id: Some("41".into()),
@@ -881,6 +885,10 @@ mod tests {
             &mut snapshot,
             NormalizedTaskEvent {
                 id: "thread-approval".into(),
+                turn_id: Some("turn-approval".into()),
+                item_id: Some("item-approval".into()),
+                request_id: Some("41".into()),
+                resolved_request_id: None,
                 title: "需要确认".into(),
                 waiting_reason: Some("需要批准命令".into()),
                 approval_request_id: Some("41".into()),
@@ -896,6 +904,10 @@ mod tests {
             &mut snapshot,
             NormalizedTaskEvent {
                 id: "thread-approval".into(),
+                turn_id: Some("turn-approval".into()),
+                item_id: Some("item-approval".into()),
+                request_id: None,
+                resolved_request_id: None,
                 title: "需要确认".into(),
                 waiting_reason: None,
                 approval_request_id: None,

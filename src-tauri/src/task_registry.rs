@@ -31,6 +31,15 @@ impl TaskRegistry {
         };
         let status = map_task_status(&task_event);
         if let Some(task) = self.tasks.iter_mut().find(|task| task.id == event.id) {
+            if let Some(resolved_id) = event.resolved_request_id.as_deref() {
+                if task.approval_request_id.as_deref() == Some(resolved_id) {
+                    task.approval_request_id = None;
+                    task.waiting_reason = None;
+                    task.status = if event.completed { TaskStatus::Completed } else { TaskStatus::Running };
+                    task.updated_at = task.updated_at.max(updated_at);
+                    return;
+                }
+            }
             let keep_approval = task.status == TaskStatus::NeedsAction
                 && matches!(status, TaskStatus::None | TaskStatus::Running)
                 && event.approval_request_id.is_none()
@@ -115,6 +124,10 @@ mod tests {
     fn event(id: &str, waiting: bool, running: bool, completed: bool, updated_at: i64) -> NormalizedTaskEvent {
         NormalizedTaskEvent {
             id: id.into(),
+            turn_id: Some(format!("turn-{id}")),
+            item_id: Some(format!("item-{id}")),
+            request_id: waiting.then(|| format!("request-{id}")),
+            resolved_request_id: None,
             title: format!("任务 {id}"),
             waiting_reason: waiting.then(|| "需要确认".into()),
             approval_request_id: waiting.then(|| format!("request-{id}")),

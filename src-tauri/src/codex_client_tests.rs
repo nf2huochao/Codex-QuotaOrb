@@ -34,6 +34,7 @@ mod tests {
         )
         .unwrap();
         assert!(event.waiting_for_user);
+        assert_eq!(event.approval_request_id.as_deref(), Some("x"));
         assert!(!event.running);
     }
     #[test]
@@ -51,6 +52,32 @@ mod tests {
         assert_eq!(event.id, "thread-1");
         assert!(event.running);
         assert!(!event.completed);
+    }
+    #[test]
+    fn parses_command_approval_request_shape_as_needs_action() {
+        let event = parse_event_line(
+            r#"{"jsonrpc":"2.0","id":7,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"item-1","command":"git push","cwd":"C:\\work","reason":"需要确认"}}"#,
+        )
+        .unwrap();
+        assert_eq!(event.id, "thread-1");
+        assert_eq!(event.turn_id.as_deref(), Some("turn-1"));
+        assert_eq!(event.item_id.as_deref(), Some("item-1"));
+        assert_eq!(event.request_id.as_deref(), Some("7"));
+        assert_eq!(event.approval_request_id.as_deref(), Some("7"));
+        assert_eq!(event.waiting_reason.as_deref(), Some("需要确认"));
+        assert!(event.waiting_for_user);
+        assert!(!event.running);
+        assert!(!event.completed);
+    }
+    #[test]
+    fn parses_user_input_and_resolution_requests() {
+        let request = parse_event_line(r#"{"jsonrpc":"2.0","id":8,"method":"item/tool/requestUserInput","params":{"threadId":"thread-2","turnId":"turn-2","itemId":"item-2","questions":[]}}"#).unwrap();
+        assert_eq!(request.id, "thread-2");
+        assert_eq!(request.approval_request_id.as_deref(), Some("8"));
+        assert!(request.waiting_for_user);
+        let resolved = parse_event_line(r#"{"method":"serverRequest/resolved","params":{"threadId":"thread-2","requestId":8}}"#).unwrap();
+        assert_eq!(resolved.id, "thread-2");
+        assert_eq!(resolved.resolved_request_id.as_deref(), Some("8"));
     }
     #[test]
     fn rejects_malformed_and_missing_payloads() {
