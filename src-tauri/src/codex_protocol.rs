@@ -230,9 +230,9 @@ pub fn parse_event_line(input: &str) -> Result<NormalizedTaskEvent, ProtocolErro
     let params = root.get("params").unwrap_or(&root);
     let thread = params.get("thread");
     let id = params
-        .get("id")
-        .or_else(|| params.get("thread_id"))
+        .get("thread_id")
         .or_else(|| params.get("threadId"))
+        .or_else(|| params.get("id"))
         .or_else(|| params.get("turnId"))
         .or_else(|| params.get("item").and_then(|item| item.get("threadId")))
         .or_else(|| params.get("item").and_then(|item| item.get("thread_id")))

@@ -10,8 +10,8 @@ if (!app) throw new Error('app root is missing')
 
 const designPreview = new URLSearchParams(window.location.search).has('design-preview')
 const fallback: Snapshot = designPreview
-  ? { status: 'fresh', fetchedAt: Math.floor(Date.now() / 1000), quotaRemainingPercent: 22, todayTokens: 0, tasks: [], activeTaskCount: 0, schemaVersion: '1.0' }
-  : { status: 'stale', tasks: [], activeTaskCount: 0, schemaVersion: '1.0', error: '等待连接 Codex app-server' }
+  ? { status: 'fresh', fetchedAt: Math.floor(Date.now() / 1000), quotaRemainingPercent: 22, todayTokens: 0, tasks: [], taskCounts: { none: 0, needsAction: 0, running: 0, completed: 0 }, activeTaskCount: 0, history: [], schemaVersion: '1.0' }
+  : { status: 'stale', tasks: [], taskCounts: { none: 0, needsAction: 0, running: 0, completed: 0 }, activeTaskCount: 0, history: [], schemaVersion: '1.0', error: '等待连接 Codex app-server' }
 let snapshot = fallback
 type ViewState = 'ball' | 'summary' | 'details'
 let viewState: ViewState = 'ball'
@@ -78,6 +78,13 @@ function renderView() {
           pairingInfo = next
           detailsView?.setPairingInfo(next)
         }).catch(() => undefined)
+      }, async (taskId, decision) => {
+        try {
+          await invoke('respond_to_approval', { taskId, decision })
+          await refresh()
+        } catch (error) {
+          applySnapshot({ ...snapshot, status: 'error', error: error instanceof Error ? error.message : '批准请求处理失败' })
+        }
       })
     }
     detailsView.update(snapshot)

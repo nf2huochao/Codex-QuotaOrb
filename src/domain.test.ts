@@ -54,9 +54,19 @@ describe('snapshot diff', () => {
   it('returns an empty diff for identical snapshots', () => {
     expect(diffSnapshot(base, { ...base })).toEqual({})
   })
+  it('does not treat freshly normalized equal counts as a change', () => {
+    const next = normalizeSnapshot({ status: 'fresh', quota_remaining_percent: 72, today_tokens: 1, active_task_count: 0, task_counts: { none: 0, needs_action: 0, running: 0, completed: 0 }, tasks: [], schema_version: '1.0' })
+    expect(diffSnapshot(base, next)).toEqual({})
+  })
   it('includes task rows when task state changes', () => {
     const tasks = [{ id: 't', title: 'Task', status: 'running' as const, updatedAt: 1, acknowledged: false }]
     const next = { ...base, activeTaskCount: 1, tasks }
     expect(diffSnapshot(base, next)).toEqual({ activeTaskCount: 1, tasks })
+  })
+  it('includes task rows when the current activity changes', () => {
+    const task = { id: 't', title: 'Task', activity: '第一步', status: 'running' as const, updatedAt: 1, acknowledged: false }
+    const next = { ...base, activeTaskCount: 1, tasks: [task] }
+    const updated = { ...next, tasks: [{ ...task, activity: '第二步' }] }
+    expect(diffSnapshot(next, updated)).toEqual({ tasks: updated.tasks })
   })
 })

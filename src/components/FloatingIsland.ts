@@ -1,4 +1,4 @@
-import { Snapshot, STATUS_COLOR, TaskStatus } from '../domain'
+import { Snapshot, STATUS_COLOR, TaskStatus, taskStatusCounts } from '../domain'
 
 export interface MountedView {
   update(snapshot: Snapshot): void
@@ -36,26 +36,34 @@ function wireDoubleClickOrDrag(button: HTMLButtonElement, onDoubleClick: () => v
 }
 
 function statusFor(snapshot: Snapshot): TaskStatus {
-  return snapshot.tasks.find((task) => task.status === 'needs_action')?.status
-    ?? snapshot.tasks.find((task) => task.status === 'completed' && !task.acknowledged)?.status
-    ?? snapshot.tasks.find((task) => task.status === 'running')?.status
-    ?? 'none'
+  const counts = taskStatusCounts(snapshot.tasks, snapshot.taskCounts)
+  if (counts.needs_action > 0) return 'needs_action'
+  if (counts.completed > 0) return 'completed'
+  if (counts.running > 0) return 'running'
+  return 'none'
 }
 
 function islandSummary(snapshot: Snapshot) {
   const status = statusFor(snapshot)
-  const taskCount = snapshot.tasks.filter((task) => !task.acknowledged && (task.status === 'running' || task.status === 'needs_action')).length
-  const runningCount = snapshot.tasks.filter((task) => !task.acknowledged && task.status === 'running').length
-  const actionCount = snapshot.tasks.filter((task) => !task.acknowledged && task.status === 'needs_action').length
-  const completedCount = snapshot.tasks.filter((task) => !task.acknowledged && task.status === 'completed').length
-  const taskSummary = actionCount
-    ? `${actionCount} 个任务待处理`
-    : completedCount
-      ? `${completedCount} 个任务已完成`
-      : runningCount
-        ? `${runningCount} 个任务执行中`
-        : statusLabel[status]
-  return { status, taskCount, taskSummary }
+  const counts = taskStatusCounts(snapshot.tasks, snapshot.taskCounts)
+  const taskCount = counts.needs_action + counts.running + counts.completed
+  return { status, taskCount }
+}
+
+function renderTaskStatusCounts(container: HTMLElement, snapshot: Snapshot) {
+  const counts = taskStatusCounts(snapshot.tasks, snapshot.taskCounts)
+  const entries: Array<{ status: TaskStatus; label: string }> = [
+    { status: 'needs_action', label: '红' },
+    { status: 'running', label: '黄' },
+    { status: 'completed', label: '绿' },
+  ].filter(({ status }) => counts[status] > 0)
+  if (!entries.length) {
+    container.innerHTML = `<span class="task-count task-count-empty" data-status="none"><i class="task-count-dot" style="--status-color:${STATUS_COLOR.none}"></i><b>0</b></span>`
+    container.setAttribute('aria-label', '无任务 0')
+    return
+  }
+  container.innerHTML = entries.map(({ status, label }) => `<span class="task-count" data-status="${status}" aria-label="${label}${counts[status]}"><i class="task-count-dot" style="--status-color:${STATUS_COLOR[status]}"></i><b>${counts[status]}</b></span>`).join('')
+  container.setAttribute('aria-label', entries.map(({ status, label }) => `${label} ${counts[status]}`).join('，'))
 }
 
 export function mountFloatingBall(root: HTMLElement, onOpen: () => void): MountedView {
@@ -92,7 +100,7 @@ export function renderFloatingBall(root: HTMLElement, snapshot: Snapshot, onOpen
 export function mountFloatingIsland(root: HTMLElement, onOpen: () => void): MountedView {
   root.innerHTML = `<button class="island-shell" aria-label="打开额度详情" type="button" data-tauri-drag-region>
     <span class="island-segment quota-segment"><span class="quota-gauge"><span class="quota-ring" aria-hidden="true"></span><b></b></span><span><small>本周剩余</small><strong class="quota-copy"></strong></span></span>
-    <span class="island-segment task-segment"><span class="status-dot"></span><span><small>任务状态</small><strong class="task-copy"></strong></span></span>
+    <span class="island-segment task-segment"><span class="status-dot"></span><span class="task-status-copy"><small>任务状态</small><strong class="task-copy"></strong><span class="task-counts" aria-label="任务状态统计"></span></span></span>
     <span class="island-segment token-segment"><span><small class="token-label"></small><strong class="token-copy"></strong></span></span>
   </button>`
   const button = root.querySelector<HTMLButtonElement>('.island-shell')!
@@ -101,6 +109,7 @@ export function mountFloatingIsland(root: HTMLElement, onOpen: () => void): Moun
   const quotaCopy = root.querySelector<HTMLElement>('.quota-copy')!
   const taskDot = root.querySelector<HTMLElement>('.status-dot')!
   const taskCopy = root.querySelector<HTMLElement>('.task-copy')!
+  const taskCounts = root.querySelector<HTMLElement>('.task-counts')!
   const tokenLabelNode = root.querySelector<HTMLElement>('.token-label')!
   const tokenCopy = root.querySelector<HTMLElement>('.token-copy')!
   button.querySelectorAll<HTMLElement>('*').forEach((element) => element.setAttribute('data-tauri-drag-region', ''))
@@ -113,7 +122,8 @@ export function mountFloatingIsland(root: HTMLElement, onOpen: () => void): Moun
       quotaCopy.textContent = snapshot.status !== 'fresh' ? '数据待确认' : '额度可用'
       const summary = islandSummary(snapshot)
       taskDot.style.setProperty('--status-color', STATUS_COLOR[summary.status])
-      taskCopy.textContent = summary.taskCount ? summary.taskSummary : statusLabel[summary.status]
+      taskCopy.textContent = summary.taskCount ? '任务状态' : statusLabel.none
+      renderTaskStatusCounts(taskCounts, snapshot)
       tokenLabelNode.textContent = tokenLabel(snapshot)
       tokenCopy.textContent = formatTokens(snapshot.todayTokens)
       drawQuotaRing(ring, percent)

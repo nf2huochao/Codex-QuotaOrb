@@ -56,14 +56,18 @@ export interface Snapshot {
   schemaVersion: string
 }
 
-export type SnapshotChanges = Partial<Pick<Snapshot, 'status' | 'changedAt' | 'source' | 'fetchedAt' | 'quotaRemainingPercent' | 'quotaResetsAt' | 'plan' | 'resetCredits' | 'todayTokens' | 'usageDate' | 'activeTaskCount' | 'tasks' | 'error' | 'history' | 'schemaVersion'>>
+export type SnapshotChanges = Partial<Pick<Snapshot, 'status' | 'changedAt' | 'source' | 'fetchedAt' | 'quotaRemainingPercent' | 'quotaResetsAt' | 'plan' | 'resetCredits' | 'todayTokens' | 'usageDate' | 'activeTaskCount' | 'taskCounts' | 'tasks' | 'error' | 'history' | 'schemaVersion'>>
 
 function tasksEqual(left: Snapshot['tasks'], right: Snapshot['tasks']) {
   if (left.length !== right.length) return false
   return left.every((task, index) => {
     const other = right[index]
-    return task.id === other.id && task.title === other.title && task.waitingReason === other.waitingReason && task.approvalRequestId === other.approvalRequestId && task.status === other.status && task.tokenCount === other.tokenCount && task.updatedAt === other.updatedAt && task.acknowledged === other.acknowledged
+    return task.id === other.id && task.title === other.title && task.activity === other.activity && task.waitingReason === other.waitingReason && task.approvalRequestId === other.approvalRequestId && task.status === other.status && task.tokenCount === other.tokenCount && task.updatedAt === other.updatedAt && task.acknowledged === other.acknowledged
   })
+}
+
+function taskCountsEqual(left: Snapshot['taskCounts'], right: Snapshot['taskCounts']) {
+  return left.none === right.none && left.needsAction === right.needsAction && left.running === right.running && left.completed === right.completed
 }
 
 function historyEqual(left: Snapshot['history'], right: Snapshot['history']) {
@@ -76,8 +80,9 @@ function historyEqual(left: Snapshot['history'], right: Snapshot['history']) {
 /** Return only fields that changed so mounted views can update stable DOM nodes. */
 export function diffSnapshot(previous: Snapshot, next: Snapshot): SnapshotChanges {
   const changes: SnapshotChanges = {}
-  const scalarKeys: Array<keyof Snapshot> = ['status', 'changedAt', 'source', 'fetchedAt', 'quotaRemainingPercent', 'quotaResetsAt', 'plan', 'resetCredits', 'todayTokens', 'usageDate', 'activeTaskCount', 'taskCounts', 'error', 'history', 'schemaVersion']
+  const scalarKeys: Array<keyof Snapshot> = ['status', 'changedAt', 'source', 'fetchedAt', 'quotaRemainingPercent', 'quotaResetsAt', 'plan', 'resetCredits', 'todayTokens', 'usageDate', 'activeTaskCount', 'error', 'history', 'schemaVersion']
   scalarKeys.filter((key) => key !== 'history').forEach((key) => { if (previous[key] !== next[key]) (changes as Record<string, unknown>)[key] = next[key] })
+  if (!taskCountsEqual(previous.taskCounts, next.taskCounts)) changes.taskCounts = next.taskCounts
   if (!historyEqual(previous.history, next.history)) changes.history = next.history
   if (!tasksEqual(previous.tasks, next.tasks)) changes.tasks = next.tasks
   return changes
