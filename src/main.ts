@@ -56,7 +56,11 @@ function scheduleDetailsResize() {
   if (viewState !== 'details') return
   window.requestAnimationFrame(() => {
     const panel = detailsRoot.querySelector<HTMLElement>('.details-panel')
-    if (panel) resizeWindow(620, panel.scrollHeight + 28, true)
+    if (panel) {
+      // Measure after the task list has rendered so the footer remains below it.
+      const desiredHeight = Math.ceil(panel.scrollHeight + 32)
+      resizeWindow(620, desiredHeight, true)
+    }
   })
 }
 

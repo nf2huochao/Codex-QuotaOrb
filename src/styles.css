@@ -54,7 +54,7 @@ button { font:inherit; }
 .pairing-card code { display:block; margin:6px 0; color:#5b6c55; font-size:11px; line-height:1.45; word-break:break-all; }
 .task-header { margin-bottom:8px; font-size:13px; }
 .task-header span { color:#8a9588; font-size:12px; }
-.task-list { list-style:none; padding:0; margin:0; max-height:430px; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; }
+.task-list { list-style:none; padding:0; margin:0; max-height:560px; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; }
 .task-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid rgba(117,130,111,.12); }
 .task-copy { flex:1; min-width:0; }
 .task-copy strong,.task-copy small { display:block; }

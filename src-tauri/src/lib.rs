@@ -160,7 +160,9 @@ fn set_window_expanded(
     window: tauri::Window,
 ) -> Result<(), String> {
     let height = if expanded {
-        height.unwrap_or(440.0).clamp(360.0, 820.0)
+        // Leave enough room for the trend card, task list and refresh action.
+        // The task list still scrolls when it exceeds the available screen area.
+        height.unwrap_or(440.0).clamp(360.0, 1100.0)
     } else {
         height.unwrap_or(120.0).clamp(96.0, 220.0)
     };
