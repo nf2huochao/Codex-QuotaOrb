@@ -23,7 +23,7 @@ function renderHistory(root: HTMLElement, snapshot: Snapshot) {
 }
 
 function renderTaskCounts(root: HTMLElement, snapshot: Snapshot) {
-  const counts = taskStatusCounts(snapshot.tasks, snapshot.taskCounts)
+  const counts = taskStatusCounts(snapshot.tasks)
   const entries: Array<{ status: TaskStatus; label: string; count: number }> = [
     { status: 'needs_action', label: '红', count: counts.needs_action },
     { status: 'running', label: '黄', count: counts.running },

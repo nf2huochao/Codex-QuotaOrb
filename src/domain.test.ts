@@ -38,7 +38,14 @@ describe('snapshot transport', () => {
   })
   it('normalizes canonical task counts from the backend', () => {
     const snapshot = normalizeSnapshot({ task_counts: { none: 0, needs_action: 1, running: 2, completed: 3 }, tasks: [] })
-    expect(taskStatusCounts(snapshot.tasks, snapshot.taskCounts)).toEqual({ none: 0, needs_action: 1, running: 2, completed: 3 })
+    expect(snapshot.taskCounts).toEqual({ none: 0, needsAction: 1, running: 2, completed: 3 })
+  })
+  it('derives display counts from the same task rows shown in details', () => {
+    const snapshot = normalizeSnapshot({ task_counts: { none: 0, needs_action: 0, running: 1, completed: 0 }, tasks: [
+      { id: 'run-1', status: 'running', acknowledged: false },
+      { id: 'run-2', status: 'running', acknowledged: false },
+    ] })
+    expect(taskStatusCounts(snapshot.tasks)).toEqual({ none: 0, needs_action: 0, running: 2, completed: 0 })
   })
   it('normalizes quota-only hourly history points', () => {
     const snapshot = normalizeSnapshot({ history: [{ at: 100, quota_remaining_percent: 72, today_tokens: 999 }] })

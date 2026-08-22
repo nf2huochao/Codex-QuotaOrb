@@ -43,7 +43,7 @@
     const esc=s=>String(s??'--').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const fmt=x=>x?new Date(x*1000).toLocaleString('zh-CN',{hour12:false}):'--';
     const sourceLabel=source=>source==='app-server-event'?'实时事件':source==='task-watch'?'任务监听':source==='permission-hook'?'批准监听':source==='metrics-poll'?'指标轮询':source==='full-poll'?'完整校准':source==='manual-refresh'?'手动刷新':'';
-    const taskStatusCounts=(tasks,canonical)=>canonical?{none:Number(canonical.none??0),needs_action:Number(canonical.needs_action??canonical.needsAction??0),running:Number(canonical.running??0),completed:Number(canonical.completed??0)}:tasks.reduce((counts,task)=>{if(!task.acknowledged){const status=task.status||'none';if(status in counts)counts[status]++}return counts},{none:0,needs_action:0,running:0,completed:0});
+    const taskStatusCounts=tasks=>tasks.reduce((counts,task)=>{if(!task.acknowledged){const status=task.status||'none';if(status in counts)counts[status]++}return counts},{none:0,needs_action:0,running:0,completed:0});
     const statusLabel=status=>({none:'无活跃任务',needs_action:'需要批准 / 回复 / 确认',running:'正在执行',completed:'已完成，可验收'})[status]||'状态未知';
     const formatTokens=value=>value===undefined||value===null?'--':value>=1000000?(value/1000000).toFixed(1)+'M':value>=1000?(value/1000).toFixed(value>=100000?'0':'1')+'K':String(value);
     function renderHistory(points){
@@ -69,7 +69,7 @@
       const changed=Number(s.changed_at??s.changedAt);
       if(Number.isFinite(changed)){if(changed<lastChangedAt||(changed===lastChangedAt&&transportRank>0&&transportRank<lastTransportRank))return;lastChangedAt=changed;lastTransportRank=Math.max(lastTransportRank,transportRank)}
       const signature=JSON.stringify(s);if(signature===lastSignature)return;lastSignature=signature;latestSnapshot=s;
-      const tasks=s.tasks||[],counts=taskStatusCounts(tasks,s.task_counts??s.taskCounts),pct=s.quota_remaining_percent??s.quotaRemainingPercent;
+      const tasks=s.tasks||[],counts=taskStatusCounts(tasks),pct=s.quota_remaining_percent??s.quotaRemainingPercent;
       const statusPriority=['needs_action','completed','running','none'],st=statusPriority.find(status=>counts[status]>0)||'none';
       const taskText=counts.needs_action||counts.running||counts.completed?'任务状态':'无活跃任务';
       const countParts=[];if(counts.needs_action)countParts.push(`<span class="task-count" data-status="needs_action" aria-label="需要批准 ${counts.needs_action}"><i class="task-count-dot" style="--status-color:${color.needs_action}"></i><b>${counts.needs_action}</b></span>`);if(counts.running)countParts.push(`<span class="task-count" data-status="running" aria-label="正在执行 ${counts.running}"><i class="task-count-dot" style="--status-color:${color.running}"></i><b>${counts.running}</b></span>`);if(counts.completed)countParts.push(`<span class="task-count" data-status="completed" aria-label="已完成 ${counts.completed}"><i class="task-count-dot" style="--status-color:${color.completed}"></i><b>${counts.completed}</b></span>`);const countText=countParts.length?countParts.join(''):`<span class="task-count task-count-empty" data-status="none" aria-label="无任务 0"><i class="task-count-dot" style="--status-color:${color.none}"></i><b>0</b></span>`;

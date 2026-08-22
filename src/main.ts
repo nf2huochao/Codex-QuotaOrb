@@ -59,7 +59,9 @@ function scheduleDetailsResize() {
     if (panel) {
       // Measure after the task list has rendered so the footer remains below it.
       const desiredHeight = Math.ceil(panel.scrollHeight + 32)
-      resizeWindow(620, desiredHeight, true)
+      const screenHeight = window.screen?.availHeight ?? 0
+      const screenLimit = screenHeight > 0 ? Math.max(360, screenHeight - 24) : desiredHeight
+      resizeWindow(620, Math.min(desiredHeight, screenLimit), true)
     }
   })
 }

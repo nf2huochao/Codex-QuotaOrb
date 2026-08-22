@@ -137,8 +137,7 @@ export function normalizeSnapshot(input: unknown): Snapshot {
   }
 }
 
-export function taskStatusCounts(tasks: TaskSummary[], canonical?: TaskCounts) {
-  if (canonical) return { none: canonical.none, needs_action: canonical.needsAction, running: canonical.running, completed: canonical.completed }
+export function taskStatusCounts(tasks: TaskSummary[]) {
   const counts: Record<TaskStatus, number> = { none: 0, needs_action: 0, running: 0, completed: 0 }
   tasks.forEach((task) => { if (!task.acknowledged) counts[task.status] += 1 })
   return counts

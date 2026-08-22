@@ -36,7 +36,7 @@ function wireDoubleClickOrDrag(button: HTMLButtonElement, onDoubleClick: () => v
 }
 
 function statusFor(snapshot: Snapshot): TaskStatus {
-  const counts = taskStatusCounts(snapshot.tasks, snapshot.taskCounts)
+  const counts = taskStatusCounts(snapshot.tasks)
   if (counts.needs_action > 0) return 'needs_action'
   if (counts.completed > 0) return 'completed'
   if (counts.running > 0) return 'running'
@@ -45,13 +45,13 @@ function statusFor(snapshot: Snapshot): TaskStatus {
 
 function islandSummary(snapshot: Snapshot) {
   const status = statusFor(snapshot)
-  const counts = taskStatusCounts(snapshot.tasks, snapshot.taskCounts)
+  const counts = taskStatusCounts(snapshot.tasks)
   const taskCount = counts.needs_action + counts.running + counts.completed
   return { status, taskCount }
 }
 
 function renderTaskStatusCounts(container: HTMLElement, snapshot: Snapshot) {
-  const counts = taskStatusCounts(snapshot.tasks, snapshot.taskCounts)
+  const counts = taskStatusCounts(snapshot.tasks)
   const entries: Array<{ status: TaskStatus; label: string }> = [
     { status: 'needs_action', label: '红' },
     { status: 'running', label: '黄' },
