@@ -4,6 +4,8 @@ export type DataStatus = 'fresh' | 'stale' | 'error' | 'unauthenticated'
 export interface TaskEvent {
   id: string
   title: string
+  waitingReason?: string
+  approvalRequestId?: string
   waitingForUser: boolean
   running: boolean
   completed: boolean
@@ -14,10 +16,25 @@ export interface TaskEvent {
 export interface TaskSummary {
   id: string
   title: string
+  activity?: string
+  waitingReason?: string
+  approvalRequestId?: string
   status: Exclude<TaskStatus, 'none'> | 'none'
   tokenCount?: number
   updatedAt: number
   acknowledged: boolean
+}
+
+export interface UsagePoint {
+  at: number
+  quotaRemainingPercent?: number
+}
+
+export interface TaskCounts {
+  none: number
+  needsAction: number
+  running: number
+  completed: number
 }
 
 export interface Snapshot {
@@ -32,26 +49,36 @@ export interface Snapshot {
   todayTokens?: number
   usageDate?: string
   activeTaskCount: number
+  taskCounts: TaskCounts
   tasks: TaskSummary[]
   error?: string
+  history: UsagePoint[]
   schemaVersion: string
 }
 
-export type SnapshotChanges = Partial<Pick<Snapshot, 'status' | 'changedAt' | 'source' | 'fetchedAt' | 'quotaRemainingPercent' | 'quotaResetsAt' | 'plan' | 'resetCredits' | 'todayTokens' | 'usageDate' | 'activeTaskCount' | 'tasks' | 'error' | 'schemaVersion'>>
+export type SnapshotChanges = Partial<Pick<Snapshot, 'status' | 'changedAt' | 'source' | 'fetchedAt' | 'quotaRemainingPercent' | 'quotaResetsAt' | 'plan' | 'resetCredits' | 'todayTokens' | 'usageDate' | 'activeTaskCount' | 'tasks' | 'error' | 'history' | 'schemaVersion'>>
 
 function tasksEqual(left: Snapshot['tasks'], right: Snapshot['tasks']) {
   if (left.length !== right.length) return false
   return left.every((task, index) => {
     const other = right[index]
-    return task.id === other.id && task.title === other.title && task.status === other.status && task.tokenCount === other.tokenCount && task.updatedAt === other.updatedAt && task.acknowledged === other.acknowledged
+    return task.id === other.id && task.title === other.title && task.waitingReason === other.waitingReason && task.approvalRequestId === other.approvalRequestId && task.status === other.status && task.tokenCount === other.tokenCount && task.updatedAt === other.updatedAt && task.acknowledged === other.acknowledged
+  })
+}
+
+function historyEqual(left: Snapshot['history'], right: Snapshot['history']) {
+  return left.length === right.length && left.every((point, index) => {
+    const other = right[index]
+    return point.at === other.at && point.quotaRemainingPercent === other.quotaRemainingPercent
   })
 }
 
 /** Return only fields that changed so mounted views can update stable DOM nodes. */
 export function diffSnapshot(previous: Snapshot, next: Snapshot): SnapshotChanges {
   const changes: SnapshotChanges = {}
-  const scalarKeys: Array<keyof Snapshot> = ['status', 'changedAt', 'source', 'fetchedAt', 'quotaRemainingPercent', 'quotaResetsAt', 'plan', 'resetCredits', 'todayTokens', 'usageDate', 'activeTaskCount', 'error', 'schemaVersion']
-  scalarKeys.forEach((key) => { if (previous[key] !== next[key]) (changes as Record<string, unknown>)[key] = next[key] })
+  const scalarKeys: Array<keyof Snapshot> = ['status', 'changedAt', 'source', 'fetchedAt', 'quotaRemainingPercent', 'quotaResetsAt', 'plan', 'resetCredits', 'todayTokens', 'usageDate', 'activeTaskCount', 'taskCounts', 'error', 'history', 'schemaVersion']
+  scalarKeys.filter((key) => key !== 'history').forEach((key) => { if (previous[key] !== next[key]) (changes as Record<string, unknown>)[key] = next[key] })
+  if (!historyEqual(previous.history, next.history)) changes.history = next.history
   if (!tasksEqual(previous.tasks, next.tasks)) changes.tasks = next.tasks
   return changes
 }
@@ -73,11 +100,23 @@ export function normalizeSnapshot(input: unknown): Snapshot {
     todayTokens: asNumber(raw.todayTokens ?? raw.today_tokens),
     usageDate: typeof (raw.usageDate ?? raw.usage_date) === 'string' ? String(raw.usageDate ?? raw.usage_date) : undefined,
     activeTaskCount: Number(raw.activeTaskCount ?? raw.active_task_count ?? 0),
+    taskCounts: (() => {
+      const counts = (raw.taskCounts ?? raw.task_counts) as Record<string, unknown> | undefined
+      return {
+        none: Number(counts?.none ?? 0),
+        needsAction: Number(counts?.needsAction ?? counts?.needs_action ?? 0),
+        running: Number(counts?.running ?? 0),
+        completed: Number(counts?.completed ?? 0),
+      }
+    })(),
     tasks: rawTasks.map((item) => {
       const task = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>
       return {
         id: String(task.id ?? ''),
         title: String(task.title ?? 'Codex task'),
+        activity: typeof task.activity === 'string' ? task.activity : undefined,
+        waitingReason: typeof task.waitingReason === 'string' ? task.waitingReason : typeof task.waiting_reason === 'string' ? task.waiting_reason : undefined,
+        approvalRequestId: typeof task.approvalRequestId === 'string' ? task.approvalRequestId : typeof task.approval_request_id === 'string' ? task.approval_request_id : undefined,
         status: (task.status as TaskSummary['status']) ?? 'none',
         tokenCount: asNumber(task.tokenCount ?? task.token_count),
         updatedAt: Number(task.updatedAt ?? task.updated_at ?? 0),
@@ -85,8 +124,19 @@ export function normalizeSnapshot(input: unknown): Snapshot {
       }
     }),
     error: raw.error as string | undefined,
+    history: Array.isArray(raw.history) ? raw.history.map((item) => {
+      const point = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>
+      return { at: Number(point.at ?? 0), quotaRemainingPercent: asNumber(point.quotaRemainingPercent ?? point.quota_remaining_percent) }
+    }).filter((point) => point.at > 0) : [],
     schemaVersion: String(raw.schemaVersion ?? raw.schema_version ?? '1.0'),
   }
+}
+
+export function taskStatusCounts(tasks: TaskSummary[], canonical?: TaskCounts) {
+  if (canonical) return { none: canonical.none, needs_action: canonical.needsAction, running: canonical.running, completed: canonical.completed }
+  const counts: Record<TaskStatus, number> = { none: 0, needs_action: 0, running: 0, completed: 0 }
+  tasks.forEach((task) => { if (!task.acknowledged) counts[task.status] += 1 })
+  return counts
 }
 
 export function mapTaskStatus(event: Pick<TaskEvent, 'waitingForUser' | 'running' | 'completed'>): TaskStatus {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { diffSnapshot, mapTaskStatus, normalizeSnapshot, snapshotStatus } from './domain'
+import { diffSnapshot, mapTaskStatus, normalizeSnapshot, snapshotStatus, taskStatusCounts } from './domain'
 
 describe('task status mapping', () => {
   it('prioritises user action over running', () => {
@@ -35,6 +35,10 @@ describe('snapshot transport', () => {
     expect(snapshot.quotaRemainingPercent).toBeUndefined()
     expect(snapshot.todayTokens).toBeUndefined()
     expect(snapshot.tasks[0].tokenCount).toBeUndefined()
+  })
+  it('normalizes canonical task counts from the backend', () => {
+    const snapshot = normalizeSnapshot({ task_counts: { none: 0, needs_action: 1, running: 2, completed: 3 }, tasks: [] })
+    expect(taskStatusCounts(snapshot.tasks, snapshot.taskCounts)).toEqual({ none: 0, needs_action: 1, running: 2, completed: 3 })
   })
 })
 

@@ -1,4 +1,4 @@
-use crate::snapshot_store::SnapshotStore;
+use crate::{codex_client::CodexClient, hook_bridge::HookBridge, snapshot_store::SnapshotStore};
 use axum::extract::ws::{Message, WebSocket};
 use axum::{
     extract::{Path, Query, State, WebSocketUpgrade},
@@ -9,6 +9,7 @@ use axum::{
 };
 use serde::Deserialize;
 use std::{fs, net::SocketAddr, path::Path as FsPath, sync::{Arc, RwLock}};
+use tokio::sync::Mutex as AsyncMutex;
 
 pub const LAN_PORT: u16 = 18765;
 
@@ -16,6 +17,8 @@ pub const LAN_PORT: u16 = 18765;
 pub struct LanState {
     pub store: SnapshotStore,
     pub pairing: Arc<RwLock<PairingState>>,
+    pub client: Arc<AsyncMutex<Option<Arc<CodexClient>>>>,
+    pub hook_bridge: HookBridge,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -43,6 +46,22 @@ struct PairResponse {
 #[derive(Debug, Deserialize)]
 struct PairQuery {
     pair: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApprovalRequest {
+    decision: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PermissionHookInput {
+    session_id: String,
+    turn_id: String,
+    model: String,
+    permission_mode: String,
+    tool_name: String,
+    #[allow(dead_code)]
+    tool_input: serde_json::Value,
 }
 
 pub fn create_token() -> String {
@@ -94,21 +113,38 @@ pub fn pairing_info(state: &PairingState) -> PairingInfo {
     }
 }
 
-pub fn router(store: SnapshotStore, pairing: Arc<RwLock<PairingState>>) -> Router {
+pub fn router(
+    store: SnapshotStore,
+    pairing: Arc<RwLock<PairingState>>,
+    client: Arc<AsyncMutex<Option<Arc<CodexClient>>>>,
+    hook_bridge: HookBridge,
+) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/manifest.webmanifest", get(manifest))
         .route("/api/pair", post(pair))
         .route("/api/snapshot", get(snapshot))
         .route("/api/tasks/{id}/acknowledge", post(acknowledge))
+        .route("/api/tasks/{id}/approval", post(approval))
+        .route("/api/hooks/permission", post(permission_hook))
         .route("/ws", get(websocket))
         .route("/health", get(health))
-        .with_state(LanState { store, pairing })
+        .with_state(LanState {
+            store,
+            pairing,
+            client,
+            hook_bridge,
+        })
 }
 
-pub fn spawn(store: SnapshotStore, pairing: Arc<RwLock<PairingState>>) -> tauri::async_runtime::JoinHandle<()> {
+pub fn spawn(
+    store: SnapshotStore,
+    pairing: Arc<RwLock<PairingState>>,
+    client: Arc<AsyncMutex<Option<Arc<CodexClient>>>>,
+    hook_bridge: HookBridge,
+) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
-        let app = router(store, pairing);
+        let app = router(store, pairing, client, hook_bridge);
         let address = SocketAddr::from(([0, 0, 0, 0], LAN_PORT));
         let listener = match tokio::net::TcpListener::bind(address).await {
             Ok(listener) => listener,
@@ -186,6 +222,110 @@ async fn acknowledge(
     Json(serde_json::json!({ "acknowledged": state.store.acknowledge(&id) })).into_response()
 }
 
+async fn approval(
+    Path(id): Path<String>,
+    State(state): State<LanState>,
+    headers: HeaderMap,
+    Query(query): Query<PairQuery>,
+    Json(request): Json<ApprovalRequest>,
+) -> Response {
+    let pairing = state.pairing.read().expect("pairing lock").clone();
+    if !authorized(&headers, &query, &pairing) {
+        return (StatusCode::UNAUTHORIZED, "需要局域网配对码").into_response();
+    }
+    if !matches!(request.decision.as_str(), "accept" | "decline") {
+        return (StatusCode::BAD_REQUEST, "批准决定无效").into_response();
+    }
+    let Some(task) = state.store.current().tasks.into_iter().find(|task| task.id == id) else {
+        return (StatusCode::NOT_FOUND, "任务不存在").into_response();
+    };
+    let Some(request_id) = task.approval_request_id else {
+        return (StatusCode::CONFLICT, "任务当前没有待处理的批准请求").into_response();
+    };
+    if request_id.starts_with("hook:") {
+        if state.hook_bridge.resolve(&request_id, &request.decision).await {
+            state.store.resolve_approval(&id, &request.decision);
+            return Json(serde_json::json!({ "accepted": true })).into_response();
+        }
+        return (StatusCode::CONFLICT, "批准请求已失效或已处理").into_response();
+    }
+    let Some(client) = state.client.lock().await.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Codex app-server 尚未连接").into_response();
+    };
+    match client.respond_to_approval(&request_id, &request.decision).await {
+        Ok(()) => {
+            state.store.resolve_approval(&id, &request.decision);
+            Json(serde_json::json!({ "accepted": true })).into_response()
+        }
+        Err(error) => (StatusCode::CONFLICT, error.to_string()).into_response(),
+    }
+}
+
+async fn permission_hook(
+    State(state): State<LanState>,
+    headers: HeaderMap,
+    Json(input): Json<PermissionHookInput>,
+) -> Response {
+    let pairing = state.pairing.read().expect("pairing lock").clone();
+    let hook_token = headers
+        .get("x-codex-hook-token")
+        .and_then(|value| value.to_str().ok());
+    if hook_token != Some(pairing.session_token.as_str()) {
+        return (StatusCode::UNAUTHORIZED, "Hook 身份无效").into_response();
+    }
+    let request_id = format!("hook:{}", uuid::Uuid::new_v4().simple());
+    let receiver = state.hook_bridge.register(request_id.clone()).await;
+    let reason = format!(
+        "等待批准：{} · {} · {} · turn {}",
+        input.tool_name, input.permission_mode, input.model, input.turn_id
+    );
+    let mut snapshot = state.store.current();
+    if let Some(task) = snapshot.tasks.iter_mut().find(|task| task.id == input.session_id) {
+        task.status = crate::domain::TaskStatus::NeedsAction;
+        task.waiting_reason = Some(reason);
+        task.approval_request_id = Some(request_id.clone());
+        task.updated_at = now();
+    } else {
+        snapshot.tasks.push(crate::domain::TaskSummary {
+            id: input.session_id.clone(),
+            title: format!("Codex 会话 {}", &input.session_id[..input.session_id.len().min(8)]),
+            activity: None,
+            waiting_reason: Some(reason),
+            approval_request_id: Some(request_id.clone()),
+            status: crate::domain::TaskStatus::NeedsAction,
+            token_count: None,
+            updated_at: now(),
+            acknowledged: false,
+        });
+    }
+    snapshot.changed_at = Some(now());
+    snapshot.source = Some("permission-hook".into());
+    state.store.publish_if_changed(snapshot);
+    let decision = match tokio::time::timeout(std::time::Duration::from_secs(300), receiver).await {
+        Ok(Ok(decision)) => decision,
+        _ => {
+            state.hook_bridge.remove(&request_id).await;
+            state.store.resolve_approval(&input.session_id, "decline");
+            "decline".into()
+        }
+    };
+    let behavior = if decision == "accept" { "allow" } else { "deny" };
+    Json(serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": { "behavior": behavior }
+        }
+    }))
+    .into_response()
+}
+
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 async fn websocket(
     ws: WebSocketUpgrade,
     State(state): State<LanState>,
@@ -248,15 +388,20 @@ mod tests {
             today_tokens: None,
             usage_date: None,
             active_task_count: 0,
+            task_counts: crate::domain::TaskCounts::default(),
             tasks: vec![crate::domain::TaskSummary {
                 id: "done".into(),
                 title: "完成".into(),
+                activity: None,
                 status: crate::domain::TaskStatus::Completed,
                 token_count: None,
                 updated_at: 0,
                 acknowledged: false,
+                waiting_reason: None,
+                approval_request_id: None,
             }],
             error: Some("等待".into()),
+            history: vec![],
             schema_version: "1.0".into(),
         })
         .0
@@ -264,7 +409,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_unpaired_snapshot() {
         let pairing = Arc::new(RwLock::new(PairingState { code: "1234".into(), session_token: "secret".into() }));
-        let response = router(store(), pairing)
+        let response = router(store(), pairing, Arc::new(AsyncMutex::new(None)), HookBridge::default())
             .oneshot(Request::get("/api/snapshot").body(Body::empty()).unwrap())
             .await
             .unwrap();
@@ -273,7 +418,7 @@ mod tests {
     #[tokio::test]
     async fn paired_snapshot_is_read_only() {
         let pairing = Arc::new(RwLock::new(PairingState { code: "1234".into(), session_token: "secret".into() }));
-        let response = router(store(), pairing)
+        let response = router(store(), pairing, Arc::new(AsyncMutex::new(None)), HookBridge::default())
             .oneshot(
                 Request::get("/api/snapshot?pair=secret")
                     .body(Body::empty())
@@ -292,7 +437,7 @@ mod tests {
     async fn paired_ack_changes_only_local_state() {
         let store = store();
         let pairing = Arc::new(RwLock::new(PairingState { code: "1234".into(), session_token: "secret".into() }));
-        let response = router(store.clone(), pairing)
+        let response = router(store.clone(), pairing, Arc::new(AsyncMutex::new(None)), HookBridge::default())
             .oneshot(
                 Request::post("/api/tasks/done/acknowledge?pair=secret")
                     .body(Body::empty())
@@ -306,13 +451,41 @@ mod tests {
     #[tokio::test]
     async fn four_digit_pairing_returns_session_token() {
         let pairing = Arc::new(RwLock::new(PairingState { code: "1234".into(), session_token: "secret".into() }));
-        let response = router(store(), pairing)
+        let response = router(store(), pairing, Arc::new(AsyncMutex::new(None)), HookBridge::default())
             .oneshot(Request::post("/api/pair").header("content-type", "application/json").body(Body::from(r#"{"code":"1234"}"#)).unwrap())
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = axum::body::to_bytes(response.into_body(), 4096).await.unwrap();
         assert_eq!(serde_json::from_slice::<PairResponse>(&body).unwrap().token, "secret");
+    }
+
+    #[tokio::test]
+    async fn permission_hook_round_trip_returns_manual_decision() {
+        let store = store();
+        let pairing = Arc::new(RwLock::new(PairingState { code: "1234".into(), session_token: "secret".into() }));
+        let bridge = HookBridge::default();
+        let app = router(store.clone(), pairing, Arc::new(AsyncMutex::new(None)), bridge.clone());
+        let request = Request::post("/api/hooks/permission")
+            .header("content-type", "application/json")
+            .header("x-codex-hook-token", "secret")
+            .body(Body::from(r#"{"session_id":"hook-thread","turn_id":"turn-1","model":"gpt-5","permission_mode":"default","tool_name":"exec","tool_input":{}}"#))
+            .unwrap();
+        let pending = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
+        for _ in 0..20 {
+            if let Some(task) = store.current().tasks.iter().find(|task| task.id == "hook-thread") {
+                assert_eq!(task.status, crate::domain::TaskStatus::NeedsAction);
+                let request_id = task.approval_request_id.clone().unwrap();
+                assert!(bridge.resolve(&request_id, "accept").await);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let response = pending.await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["hookSpecificOutput"]["decision"]["behavior"], "allow");
     }
 
     #[test]
