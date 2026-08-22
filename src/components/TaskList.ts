@@ -3,7 +3,8 @@ import { TaskSummary, STATUS_COLOR } from '../domain'
 export type ApprovalDecision = 'accept' | 'decline'
 
 export function renderTaskList(root: HTMLElement, tasks: TaskSummary[], onAcknowledge: (taskId: string) => void, onApproval: (taskId: string, decision: ApprovalDecision) => void = () => {}): void {
-  root.innerHTML = tasks.length ? tasks.map((task) => `
+  const visibleTasks = tasks.filter((task) => !(task.status === 'completed' && task.acknowledged))
+  root.innerHTML = visibleTasks.length ? visibleTasks.map((task) => `
     <li class="task-row ${task.acknowledged ? 'task-acknowledged' : ''}">
       <span class="status-dot" style="--status-color:${STATUS_COLOR[task.status]}"></span>
       <span class="task-copy"><strong>${escapeHtml(task.title)}</strong>${task.activity ? `<small class="task-activity">当前内容：${escapeHtml(task.activity)}</small>` : ''}<small>${label(task.status)}</small>${task.status === 'needs_action' ? `<small class="task-reason">${escapeHtml(task.waitingReason ?? '等待你的批准')}</small>` : ''}</span>
