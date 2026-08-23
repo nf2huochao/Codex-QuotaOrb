@@ -14,19 +14,19 @@ It is not a Codex client and does not replace Codex. It presents locally availab
 
 ### 桌面悬浮球 / Desktop orb
 
-![Desktop floating orb](docs/images/desktop-orb.png)
+<p align="center"><img src="docs/images/desktop-orb.png" alt="Desktop floating orb" width="320"></p>
 
 ### 三等分胶囊 / Three-part capsule
 
-![Desktop capsule](docs/images/desktop-capsule.png)
+<p align="center"><img src="docs/images/desktop-capsule.png" alt="Desktop capsule" width="760"></p>
 
 ### 详情页 / Details page
 
-![Desktop details page](docs/images/desktop-details.png)
+<p align="center"><img src="docs/images/desktop-details.png" alt="Desktop details page" width="620"></p>
 
 ### 手机局域网网页 / Mobile LAN web view
 
-![Mobile LAN web view](docs/images/mobile-lan-preview.jpg)
+<p align="center"><img src="docs/images/mobile-lan-preview.jpg" alt="Mobile LAN web view" width="320"></p>
 
 手机网页端是本项目的重要使用方式：在 Windows 主机显示的配对地址打开网页后，手机可以离开电脑桌面，在同一局域网内随时观察任务进度、额度和 Token。网页端不需要安装 App；Windows 主机必须保持开机、联网并运行悬浮窗。
 
