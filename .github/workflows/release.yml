@@ -45,6 +45,16 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
+          releaseName: Codex 额度悬浮窗 ${{ github.ref_name }}
+          releaseBody: |
+            ## 本次更新 / Release notes
+
+            - 重写中英文 README，补充桌面三态界面与手机局域网网页预览。
+            - 统一任务状态快照，修复长条与详情页统计不一致。
+            - 增加 Hook 诊断、断线提示和 Windows 本地状态监听。
+            - Signed Windows installer and updater manifest are included.
+
+            详细说明见仓库中的 CHANGELOG.md。
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
