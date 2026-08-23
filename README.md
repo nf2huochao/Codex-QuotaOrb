@@ -70,6 +70,12 @@ QuotaOrb keeps one in-memory `SnapshotStore` for both the capsule and details pa
 - 批准和拒绝始终由用户在 Codex 中完成；悬浮窗不会自动批准。
 - 更新签名私钥只应放在 GitHub Actions Secrets，绝不提交到仓库。
 
+## 许可证 / License
+
+本项目采用 [MIT License](LICENSE)。你可以自由使用、修改和分发代码，但请保留版权声明和许可证文本。第三方依赖仍受其各自许可证约束。
+
+This project is released under the [MIT License](LICENSE). You may use, modify, and distribute the code, provided that the copyright notice and license text are retained. Third-party dependencies remain under their respective licenses.
+
 ## 平台支持 / Platform support
 
 - **桌面端 / Desktop:** Windows 10/11 x64.
