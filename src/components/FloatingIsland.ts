@@ -10,7 +10,13 @@ const statusLabel: Record<TaskStatus, string> = { none: '无活跃任务', needs
 
 function formatTokens(tokens?: number) {
   if (tokens === undefined) return '--'
-  return tokens >= 1000 ? `${(tokens / 1000).toFixed(tokens >= 1_000_000 ? 0 : 1)}K` : String(tokens)
+  if (tokens < 10_000) return String(tokens)
+  if (tokens >= 100_000_000) {
+    const value = tokens / 100_000_000
+    return `${Number(value.toFixed(tokens >= 1_000_000_000 ? 0 : 1))}亿`
+  }
+  const value = tokens / 10_000
+  return `${Number(value.toFixed(tokens >= 1_000_000 ? 0 : 1))}万`
 }
 
 function tokenLabel(snapshot: Snapshot) {

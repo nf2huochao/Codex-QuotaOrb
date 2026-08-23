@@ -4,6 +4,25 @@ All notable changes to Codex QuotaOrb are documented here in Chinese and English
 
 Codex 额度悬浮窗的主要新增、改进和修复均在此以中英文记录。
 
+## v0.1.7 — 2026-08-24
+
+### Added / 新增
+
+- Added a bilingual README with real desktop and LAN mobile interface previews. / 重写中英文 README，加入真实桌面界面和手机局域网界面预览。
+- Documented the Windows desktop workflow, same-Wi‑Fi web observation, privacy boundaries, platform support, and current release status. / 补充 Windows 工作方式、同一 Wi‑Fi 网页观察、隐私边界、平台支持和当前更新状态。
+
+### Improved / 改进
+
+- Unified the desktop capsule, details page, and LAN web view around the same task snapshot and status counts. / 统一桌面长条、详情页和局域网网页的任务快照与状态计数。
+- Improved local session task discovery and filtering so internal lifecycle markers do not become fake task names. / 改进本机会话任务发现与过滤，避免内部生命周期标记变成虚假任务名称。
+- Removed stale local task rows when the authoritative session source no longer contains them. / 当权威会话源不再包含任务时移除残留任务行。
+- Stabilized the local watcher startup path and kept quota/Token reading separate from task-state observation. / 稳定本地监听器启动路径，并将额度/Token 读取与任务状态监听分开。
+
+### Release notes / 发行说明
+
+- Windows installer: `Codex 额度悬浮窗_0.1.7_x64-setup.exe`. / Windows 安装包：`Codex 额度悬浮窗_0.1.7_x64-setup.exe`。
+- This release is a stable test build. Signed updater artifacts require the repository signing secrets described in `docs/release-signing.md`. / 本版本为稳定测试版；签名更新文件需要按 `docs/release-signing.md` 配置仓库签名 Secrets。
+
 ## v0.1.6 — 2026-08-13
 
 ### Added / 新增

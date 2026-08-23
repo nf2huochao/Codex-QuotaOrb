@@ -28,6 +28,14 @@ mod tests {
         assert_eq!(threads[0].status, "active");
     }
     #[test]
+    fn parses_string_thread_status_without_downgrading_to_not_loaded() {
+        let threads = parse_threads(
+            r#"{"data":[{"id":"t2","name":"外部任务","status":"active","updatedAt":1786478441}]}"#,
+        )
+        .unwrap();
+        assert_eq!(threads[0].status, "active");
+    }
+    #[test]
     fn parses_event_and_prioritises_waiting_state() {
         let event = parse_event_line(
             r#"{"id":"x","event":"approval_required","title":"授权","updated_at":12}"#,
@@ -75,7 +83,10 @@ mod tests {
         assert_eq!(request.id, "thread-2");
         assert_eq!(request.approval_request_id.as_deref(), Some("8"));
         assert!(request.waiting_for_user);
-        let resolved = parse_event_line(r#"{"method":"serverRequest/resolved","params":{"threadId":"thread-2","requestId":8}}"#).unwrap();
+        let resolved = parse_event_line(
+            r#"{"method":"serverRequest/resolved","params":{"threadId":"thread-2","requestId":8}}"#,
+        )
+        .unwrap();
         assert_eq!(resolved.id, "thread-2");
         assert_eq!(resolved.resolved_request_id.as_deref(), Some("8"));
     }

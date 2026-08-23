@@ -45,6 +45,29 @@ pub struct TaskSummary {
     pub token_count: Option<u64>,
     pub updated_at: i64,
     pub acknowledged: bool,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub turn_id: Option<String>,
+    #[serde(default)]
+    pub received_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookDiagnostic {
+    pub event: String,
+    pub session_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub received_at: i64,
+    pub http_status: Option<u16>,
+    pub delivered: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct HookDiagnostics {
+    pub last: Option<HookDiagnostic>,
+    pub received_count: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,7 +87,10 @@ pub struct TaskCounts {
 impl TaskCounts {
     pub fn from_tasks(tasks: &[TaskSummary]) -> Self {
         let mut counts = Self::default();
-        for task in tasks.iter().filter(|task| !(task.acknowledged && task.status == TaskStatus::Completed)) {
+        for task in tasks
+            .iter()
+            .filter(|task| !(task.acknowledged && task.status == TaskStatus::Completed))
+        {
             match task.status {
                 TaskStatus::None => counts.none += 1,
                 TaskStatus::NeedsAction => counts.needs_action += 1,
@@ -95,6 +121,8 @@ pub struct Snapshot {
     pub error: Option<String>,
     #[serde(default)]
     pub history: Vec<UsagePoint>,
+    #[serde(default)]
+    pub hook_diagnostics: HookDiagnostics,
     pub schema_version: String,
 }
 
@@ -177,18 +205,104 @@ mod tests {
     #[test]
     fn task_counts_ignore_acknowledged_rows() {
         let tasks = vec![
-            TaskSummary { id: "none".into(), title: "无".into(), activity: None, waiting_reason: None, approval_request_id: None, status: TaskStatus::None, token_count: None, updated_at: 0, acknowledged: false },
-            TaskSummary { id: "red".into(), title: "红".into(), activity: None, waiting_reason: None, approval_request_id: Some("r".into()), status: TaskStatus::NeedsAction, token_count: None, updated_at: 0, acknowledged: false },
-            TaskSummary { id: "yellow".into(), title: "黄".into(), activity: None, waiting_reason: None, approval_request_id: None, status: TaskStatus::Running, token_count: None, updated_at: 0, acknowledged: false },
-            TaskSummary { id: "green".into(), title: "绿".into(), activity: None, waiting_reason: None, approval_request_id: None, status: TaskStatus::Completed, token_count: None, updated_at: 0, acknowledged: false },
-            TaskSummary { id: "acked".into(), title: "已验收".into(), activity: None, waiting_reason: None, approval_request_id: None, status: TaskStatus::Completed, token_count: None, updated_at: 0, acknowledged: true },
+            TaskSummary {
+                id: "none".into(),
+                title: "无".into(),
+                activity: None,
+                waiting_reason: None,
+                approval_request_id: None,
+                status: TaskStatus::None,
+                token_count: None,
+                updated_at: 0,
+                acknowledged: false,
+                source: None,
+                turn_id: None,
+                received_at: 0,
+            },
+            TaskSummary {
+                id: "red".into(),
+                title: "红".into(),
+                activity: None,
+                waiting_reason: None,
+                approval_request_id: Some("r".into()),
+                status: TaskStatus::NeedsAction,
+                token_count: None,
+                updated_at: 0,
+                acknowledged: false,
+                source: None,
+                turn_id: None,
+                received_at: 0,
+            },
+            TaskSummary {
+                id: "yellow".into(),
+                title: "黄".into(),
+                activity: None,
+                waiting_reason: None,
+                approval_request_id: None,
+                status: TaskStatus::Running,
+                token_count: None,
+                updated_at: 0,
+                acknowledged: false,
+                source: None,
+                turn_id: None,
+                received_at: 0,
+            },
+            TaskSummary {
+                id: "green".into(),
+                title: "绿".into(),
+                activity: None,
+                waiting_reason: None,
+                approval_request_id: None,
+                status: TaskStatus::Completed,
+                token_count: None,
+                updated_at: 0,
+                acknowledged: false,
+                source: None,
+                turn_id: None,
+                received_at: 0,
+            },
+            TaskSummary {
+                id: "acked".into(),
+                title: "已验收".into(),
+                activity: None,
+                waiting_reason: None,
+                approval_request_id: None,
+                status: TaskStatus::Completed,
+                token_count: None,
+                updated_at: 0,
+                acknowledged: true,
+                source: None,
+                turn_id: None,
+                received_at: 0,
+            },
         ];
-        assert_eq!(TaskCounts::from_tasks(&tasks), TaskCounts { none: 1, needs_action: 1, running: 1, completed: 1 });
+        assert_eq!(
+            TaskCounts::from_tasks(&tasks),
+            TaskCounts {
+                none: 1,
+                needs_action: 1,
+                running: 1,
+                completed: 1
+            }
+        );
     }
 
     #[test]
     fn task_counts_include_acknowledged_running_rows() {
-        let tasks = vec![TaskSummary { id: "run".into(), title: "重新运行".into(), activity: None, waiting_reason: None, approval_request_id: None, status: TaskStatus::Running, token_count: None, updated_at: 0, acknowledged: true }];
+        let tasks = vec![TaskSummary {
+            id: "run".into(),
+            title: "重新运行".into(),
+            activity: None,
+            waiting_reason: None,
+            approval_request_id: None,
+            status: TaskStatus::Running,
+            token_count: None,
+            updated_at: 0,
+            acknowledged: true,
+            source: None,
+            turn_id: None,
+            received_at: 0,
+        }];
         assert_eq!(TaskCounts::from_tasks(&tasks).running, 1);
     }
     #[test]

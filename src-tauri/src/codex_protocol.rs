@@ -204,8 +204,12 @@ pub fn parse_threads(input: &str) -> Result<Vec<ThreadSummary>, ProtocolError> {
                 .collect::<String>();
             let status = thread
                 .get("status")
-                .and_then(|value| value.get("type"))
-                .and_then(Value::as_str)
+                .and_then(|value| {
+                    value
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .or_else(|| value.as_str())
+                })
                 .unwrap_or("notLoaded")
                 .to_owned();
             let updated_at =
@@ -263,16 +267,26 @@ pub fn parse_event_line(input: &str) -> Result<NormalizedTaskEvent, ProtocolErro
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_ascii_lowercase();
-    let request_id = root
-        .get("id")
-        .map(|value| value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string()));
+    let request_id = root.get("id").map(|value| {
+        value
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| value.to_string())
+    });
     let approval_request_id = request_id.clone().filter(|_| {
-        kind.contains("approval") || kind.contains("requestuserinput") || kind.contains("elicitation/request")
+        kind.contains("approval")
+            || kind.contains("requestuserinput")
+            || kind.contains("elicitation/request")
     });
     let resolved_request_id = params
         .get("requestId")
         .or_else(|| params.get("request_id"))
-        .and_then(|value| value.as_str().map(str::to_owned).or_else(|| Some(value.to_string())))
+        .and_then(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .or_else(|| Some(value.to_string()))
+        })
         .filter(|_| kind.contains("serverrequest/resolved") || kind.contains("request/resolved"));
     let turn_id = params
         .get("turnId")
@@ -295,38 +309,46 @@ pub fn parse_event_line(input: &str) -> Result<NormalizedTaskEvent, ProtocolErro
         .and_then(|value| value.get("type").unwrap_or(value).as_str())
         .unwrap_or("")
         .to_ascii_lowercase();
+    let approval_method = matches!(
+        kind.as_str(),
+        "approval_required"
+            | "item/commandexecution/requestapproval"
+            | "item/tool/requestuserinput"
+            | "serverrequest/approval"
+            | "elicitation/request"
+    );
+    let completed_method = matches!(
+        kind.as_str(),
+        "turn/completed" | "turn/complete" | "thread/completed"
+    );
+    let running_method = matches!(
+        kind.as_str(),
+        "turn/started" | "turn/progress" | "turn/updated" | "thread/status/changed"
+    );
     let waiting_for_user = params
         .get("waiting_for_user")
         .or_else(|| params.get("waitingForUser"))
         .and_then(Value::as_bool)
         .unwrap_or(false)
-        || kind.contains("approval")
-        || kind.contains("question")
-        || kind.contains("input")
-        || kind.contains("elicitation/request");
+        || approval_method;
     let completed = params
         .get("completed")
         .and_then(Value::as_bool)
         .unwrap_or(false)
-        || kind.contains("completed")
-        || kind.contains("done")
-        || kind.contains("closed")
-        || status_type.contains("completed")
-        || status_type.contains("idle")
-        || status_type.contains("notloaded")
-        || status_type.contains("not_loaded");
+        || completed_method
+        || matches!(
+            status_type.as_str(),
+            "completed" | "complete" | "done" | "idle"
+        );
     let running = params
         .get("running")
         .and_then(Value::as_bool)
         .unwrap_or(false)
-        || kind.contains("started")
-        || kind.contains("progress")
-        || kind.contains("running")
-        || kind.contains("tokenusage")
-        || status_type.contains("active")
-        || status_type.contains("running")
-        || status_type.contains("inprogress")
-        || status_type.contains("in_progress");
+        || running_method
+        || matches!(
+            status_type.as_str(),
+            "active" | "running" | "inprogress" | "in_progress"
+        );
     let token_count = as_u64(
         params
             .get("token_count")

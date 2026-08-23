@@ -17,6 +17,7 @@ use std::{
 pub const POLL_INTERVAL: Duration = Duration::from_secs(120);
 #[allow(dead_code)]
 pub const STALE_AFTER_SECONDS: i64 = 900;
+const COMPLETED_VISIBLE_SECONDS: i64 = 6 * 60 * 60;
 
 pub async fn poll_once(
     store: &SnapshotStore,
@@ -26,12 +27,11 @@ pub async fn poll_once(
 ) -> Snapshot {
     let rate = client.read_rate_limits().await;
     let usage = client.read_usage().await;
-    let threads = client.read_threads().await.unwrap_or_default();
     match (rate, usage) {
         (Ok(rate), Ok(usage)) => {
             let rollout_tasks = RolloutWatcher::new(default_root()).scan(now);
             let mut registry = TaskRegistry::from_tasks(&previous.tasks);
-            registry.merge_sources(merge_rollout_tasks(map_threads(threads, now), rollout_tasks), now);
+            registry.merge_sources(rollout_tasks, now);
             let tasks = registry.tasks();
             let active_task_count = tasks
                 .iter()
@@ -51,9 +51,10 @@ pub async fn poll_once(
                 active_task_count,
                 task_counts: registry.counts(),
                 tasks,
-            error: None,
-            history: previous.history.clone(),
-            schema_version: "1.0".into(),
+                error: None,
+                history: previous.history.clone(),
+                hook_diagnostics: previous.hook_diagnostics.clone(),
+                schema_version: "1.0".into(),
             };
             store.publish_if_changed(snapshot.clone());
             snapshot
@@ -95,11 +96,11 @@ fn map_threads(threads: Vec<ThreadSummary>, now: i64) -> Vec<TaskSummary> {
     threads
         .into_iter()
         .filter_map(|thread| {
+            // Return to the stable monitor path: app-server thread/list is
+            // the primary live view, while the rollout file is used to
+            // resolve approval/completion when thread/list is ambiguous.
             let age = now.saturating_sub(thread.updated_at);
             let status_name = thread.status.to_ascii_lowercase();
-            // `thread/list` can continue to report `active` while a turn is
-            // paused for approval. Prefer the persisted rollout signal when
-            // it explicitly says that the user is needed.
             let rollout = rollout_status(thread.path.as_deref(), now);
             let terminal_thread = matches!(
                 status_name.as_str(),
@@ -115,20 +116,13 @@ fn map_threads(threads: Vec<ThreadSummary>, now: i64) -> Vec<TaskSummary> {
                 TaskStatus::NeedsAction
             } else if status_name == "active" || status_name == "running" {
                 TaskStatus::Running
-            } else if matches!(
-                status_name.as_str(),
-                "idle" | "completed" | "complete" | "done"
-            ) && age <= COMPLETED_VISIBLE_SECONDS
-            {
-                TaskStatus::Completed
             } else {
                 rollout.or_else(|| {
-                    (age <= 6 * 60 * 60 && status_name.contains("completed"))
+                    (age <= COMPLETED_VISIBLE_SECONDS && status_name.contains("completed"))
                         .then_some(TaskStatus::Completed)
                 })?
             };
-            let title = clean_thread_title(&thread.title)
-                .unwrap_or_else(|| "Codex 对话".into());
+            let title = clean_thread_title(&thread.title).unwrap_or_else(|| "Codex 对话".into());
             let activity = rollout_user_activity(thread.path.as_deref());
             Some(TaskSummary {
                 id: thread.id,
@@ -140,10 +134,16 @@ fn map_threads(threads: Vec<ThreadSummary>, now: i64) -> Vec<TaskSummary> {
                 token_count: None,
                 updated_at: thread.updated_at,
                 acknowledged: false,
+                source: Some("poll".into()),
+                turn_id: None,
+                received_at: now,
             })
         })
         .collect()
 }
+
+const ROLLOUT_TAIL_BYTES: u64 = 1024 * 1024;
+const RUNNING_FRESHNESS_SECONDS: i64 = 180;
 
 const ROLLOUT_HEADER_BYTES: u64 = 256 * 1024;
 
@@ -151,7 +151,9 @@ fn rollout_user_activity(path: Option<&str>) -> Option<String> {
     let path = path?;
     let file = File::open(path).ok()?;
     let mut bytes = Vec::new();
-    file.take(ROLLOUT_HEADER_BYTES).read_to_end(&mut bytes).ok()?;
+    file.take(ROLLOUT_HEADER_BYTES)
+        .read_to_end(&mut bytes)
+        .ok()?;
     extract_rollout_user_activity(&String::from_utf8_lossy(&bytes))
 }
 
@@ -170,21 +172,31 @@ fn extract_rollout_user_activity(text: &str) -> Option<String> {
         let Some(text) = payload
             .get("content")
             .and_then(|content| {
-                content
-                    .as_str()
-                    .and_then(clean_user_request)
-                    .or_else(|| content.as_array().and_then(|items| {
+                content.as_str().and_then(clean_user_request).or_else(|| {
+                    content.as_array().and_then(|items| {
                         items.iter().find_map(|item| {
-                            let item_type = item.get("type").and_then(serde_json::Value::as_str).unwrap_or("");
+                            let item_type = item
+                                .get("type")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("");
                             if item_type == "input_text" || item_type == "inputText" {
-                                item.get("text").and_then(serde_json::Value::as_str).and_then(clean_user_request)
+                                item.get("text")
+                                    .and_then(serde_json::Value::as_str)
+                                    .and_then(clean_user_request)
                             } else {
                                 None
                             }
                         })
-                    }))
+                    })
+                })
             })
-            .or_else(|| payload.get("text").and_then(serde_json::Value::as_str).and_then(clean_user_request)) else {
+            .or_else(|| {
+                payload
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(clean_user_request)
+            })
+        else {
             continue;
         };
         let activity = text
@@ -238,76 +250,8 @@ fn is_generated_context(text: &str) -> bool {
         || text.starts_with("Distinguish instructions in attached documents")
 }
 
-fn merge_polled_tasks(
-    previous: &[TaskSummary],
-    mut polled: Vec<TaskSummary>,
-    now: i64,
-) -> Vec<TaskSummary> {
-    // The thread list often remains `active` while app-server is waiting for
-    // an approval request. Keep the event-driven red state until a later
-    // completion/running event explicitly replaces it.
-    for task in &mut polled {
-        let Some(previous_task) = previous.iter().find(|item| item.id == task.id) else {
-            continue;
-        };
-        if !previous_task.acknowledged
-            && previous_task.status == TaskStatus::NeedsAction
-            && matches!(task.status, TaskStatus::None | TaskStatus::Running | TaskStatus::NeedsAction)
-        {
-            if task.status != TaskStatus::NeedsAction {
-                task.status = TaskStatus::NeedsAction;
-            }
-            task.updated_at = task.updated_at.max(previous_task.updated_at);
-            task.waiting_reason = previous_task.waiting_reason.clone().or(task.waiting_reason.clone());
-            task.approval_request_id = previous_task.approval_request_id.clone().or(task.approval_request_id.clone());
-        }
-    }
-    // `thread/list` is not guaranteed to return every live thread while the
-    // app-server is busy. Keep recent event-driven tasks that are absent from
-    // that response, otherwise the compact island under-counts the same
-    // snapshot that the details list just received.
-    for previous_task in previous {
-        if polled.iter().any(|task| task.id == previous_task.id) {
-            continue;
-        }
-        let age = now.saturating_sub(previous_task.updated_at);
-        let keep = match previous_task.status {
-            TaskStatus::NeedsAction | TaskStatus::Running => age <= STALE_AFTER_SECONDS,
-            TaskStatus::Completed => age <= COMPLETED_VISIBLE_SECONDS,
-            TaskStatus::None => false,
-        };
-        if keep {
-            polled.push(previous_task.clone());
-        }
-    }
-    polled
-}
-
-fn merge_rollout_tasks(mut polled: Vec<TaskSummary>, rollout: Vec<TaskSummary>) -> Vec<TaskSummary> {
-    for rollout_task in rollout {
-        if let Some(task) = polled.iter_mut().find(|task| task.id == rollout_task.id) {
-            task.activity = rollout_task.activity.clone().or(task.activity.clone());
-            if rollout_task.status != TaskStatus::None {
-                task.status = rollout_task.status;
-            }
-            task.waiting_reason = rollout_task.waiting_reason.clone().or(task.waiting_reason.clone());
-            task.token_count = rollout_task.token_count.or(task.token_count);
-            task.updated_at = task.updated_at.max(rollout_task.updated_at);
-        } else {
-            polled.push(rollout_task);
-        }
-    }
-    polled
-}
-
-const ROLLOUT_TAIL_BYTES: u64 = 1024 * 1024;
-const RUNNING_FRESHNESS_SECONDS: i64 = 180;
-const COMPLETED_VISIBLE_SECONDS: i64 = 6 * 60 * 60;
-
 fn rollout_status(path: Option<&str>, now: i64) -> Option<TaskStatus> {
-    let Some(path) = path else {
-        return None;
-    };
+    let path = path?;
     let mut file = File::open(path).ok()?;
     let metadata = file.metadata().ok()?;
     let modified_at = metadata
@@ -341,29 +285,16 @@ fn rollout_status(path: Option<&str>, now: i64) -> Option<TaskStatus> {
         {
             Some(TaskStatus::Completed)
         }
-        // A waiting approval has no activity heartbeat while the user is
-        // deciding. Give it the normal stale-data window instead of the much
-        // shorter running heartbeat, so a longer approval pause stays red.
-        Some(TaskStatus::NeedsAction)
-            if now.saturating_sub(modified_at) <= STALE_AFTER_SECONDS =>
+        Some(TaskStatus::Running | TaskStatus::NeedsAction)
+            if now.saturating_sub(modified_at) <= RUNNING_FRESHNESS_SECONDS =>
         {
-            Some(TaskStatus::NeedsAction)
-        }
-        Some(TaskStatus::Running) if now.saturating_sub(modified_at) <= RUNNING_FRESHNESS_SECONDS => {
-            Some(TaskStatus::Running)
+            status
         }
         _ => None,
     }
 }
 
 fn rollout_line_status(value: &serde_json::Value) -> Option<TaskStatus> {
-    let serialized = value.to_string().to_ascii_lowercase();
-    if serialized.contains("requestapproval")
-        || serialized.contains("approval_required")
-        || serialized.contains("request_user_input")
-    {
-        return Some(TaskStatus::NeedsAction);
-    }
     let record_type = value.get("type").and_then(serde_json::Value::as_str)?;
     let payload = value.get("payload").unwrap_or(value);
     let payload_type = payload
@@ -425,6 +356,74 @@ fn rollout_line_status(value: &serde_json::Value) -> Option<TaskStatus> {
     None
 }
 
+fn merge_polled_tasks(
+    previous: &[TaskSummary],
+    mut polled: Vec<TaskSummary>,
+    now: i64,
+) -> Vec<TaskSummary> {
+    // The thread list often remains `active` while app-server is waiting for
+    // an approval request. Keep the event-driven red state until a later
+    // completion/running event explicitly replaces it.
+    for task in &mut polled {
+        let Some(previous_task) = previous.iter().find(|item| item.id == task.id) else {
+            continue;
+        };
+        if !previous_task.acknowledged
+            && previous_task.status == TaskStatus::NeedsAction
+            && matches!(
+                task.status,
+                TaskStatus::None | TaskStatus::Running | TaskStatus::NeedsAction
+            )
+        {
+            if task.status != TaskStatus::NeedsAction {
+                task.status = TaskStatus::NeedsAction;
+            }
+            task.updated_at = task.updated_at.max(previous_task.updated_at);
+            task.waiting_reason = previous_task
+                .waiting_reason
+                .clone()
+                .or(task.waiting_reason.clone());
+            task.approval_request_id = previous_task
+                .approval_request_id
+                .clone()
+                .or(task.approval_request_id.clone());
+        }
+    }
+    // `thread/list` is not guaranteed to return every live thread while the
+    // app-server is busy. Keep recent event-driven tasks that are absent from
+    // that response, otherwise the compact island under-counts the same
+    // snapshot that the details list just received.
+    for previous_task in previous {
+        if polled.iter().any(|task| task.id == previous_task.id) {
+            continue;
+        }
+        let age = now.saturating_sub(previous_task.updated_at);
+        let keep = match previous_task.status {
+            TaskStatus::NeedsAction | TaskStatus::Running => age <= STALE_AFTER_SECONDS,
+            TaskStatus::Completed => age <= COMPLETED_VISIBLE_SECONDS,
+            TaskStatus::None => false,
+        };
+        if keep {
+            polled.push(previous_task.clone());
+        }
+    }
+    polled
+}
+
+fn merge_rollout_tasks(
+    mut polled: Vec<TaskSummary>,
+    rollout: Vec<TaskSummary>,
+) -> Vec<TaskSummary> {
+    for rollout_task in rollout {
+        if let Some(task) = polled.iter_mut().find(|task| task.id == rollout_task.id) {
+            task.activity = rollout_task.activity.clone().or(task.activity.clone());
+            task.token_count = rollout_task.token_count.or(task.token_count);
+            task.updated_at = task.updated_at.max(rollout_task.updated_at);
+        }
+    }
+    polled
+}
+
 pub fn spawn_poll_loop(
     store: SnapshotStore,
     client: Arc<CodexClient>,
@@ -432,12 +431,9 @@ pub fn spawn_poll_loop(
     tokio::spawn(async move {
         let intervals = SyncIntervals::default();
         let mut previous = store.current();
-        let mut rollout_watcher = RolloutWatcher::new(default_root());
         let mut notification_rx = client.subscribe_notifications();
-        let mut task_tick = tokio::time::interval(intervals.task);
         let mut metrics_tick = tokio::time::interval(intervals.metrics);
         let mut full_tick = tokio::time::interval(intervals.full);
-        task_tick.tick().await;
         metrics_tick.tick().await;
         full_tick.tick().await;
         loop {
@@ -446,19 +442,6 @@ pub fn spawn_poll_loop(
                     if let Ok(notification) = notification {
                         let now = chrono_like_now();
                         let method = notification.get("method").and_then(serde_json::Value::as_str).unwrap_or("");
-                        if let Ok(event) = crate::codex_protocol::parse_event_line(&notification.to_string()) {
-                            let mut next = previous.clone();
-                            let mut registry = TaskRegistry::from_tasks(&previous.tasks);
-                            registry.apply_event(event, now);
-                            next.tasks = registry.tasks();
-                            next.task_counts = registry.counts();
-                            next.active_task_count = next.task_counts.needs_action + next.task_counts.running;
-                            next.changed_at = Some(now);
-                            next.source = Some("app-server-event".into());
-                            next.status = snapshot_status(next.fetched_at, now, false, client.is_connected());
-                            store.publish_if_changed(next);
-                            previous = store.current();
-                        }
                         if is_metrics_notification(method) {
                             let rate = client.read_rate_limits().await;
                             let usage = client.read_usage().await;
@@ -481,23 +464,6 @@ pub fn spawn_poll_loop(
                         }
                     } else if matches!(notification, Err(tokio::sync::broadcast::error::RecvError::Closed)) {
                         break;
-                    }
-                }
-                _ = task_tick.tick() => {
-                    if !client.is_connected() { break; }
-                    let now = chrono_like_now();
-                    if let Ok(threads) = client.read_threads().await {
-                        let mut next = previous.clone();
-                        next.changed_at = Some(now);
-                        next.source = Some("task-watch".into());
-                        let rollout_tasks = rollout_watcher.scan(now);
-                        let mut registry = TaskRegistry::from_tasks(&previous.tasks);
-                        registry.merge_sources(merge_rollout_tasks(map_threads(threads, now), rollout_tasks), now);
-                        next.tasks = registry.tasks();
-                        next.task_counts = registry.counts();
-                        next.active_task_count = next.task_counts.needs_action + next.task_counts.running;
-                        store.publish_if_changed(next.clone());
-                        previous = store.current();
                     }
                 }
                 _ = metrics_tick.tick() => {
@@ -530,6 +496,46 @@ pub fn spawn_poll_loop(
             }
         }
     })
+}
+
+/// Watches the same local session records used by Codex Desktop and the HUD
+/// reference implementation. This loop is intentionally independent from the
+/// floating window's private app-server child process, so a failed or missing
+/// app-server cannot make task state disappear.
+pub fn spawn_local_task_loop(store: SnapshotStore) -> tauri::async_runtime::JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        let mut watcher = RolloutWatcher::new(default_root());
+        let mut tick = tokio::time::interval(SyncIntervals::default().task);
+        tick.tick().await;
+        loop {
+            tick.tick().await;
+            let now = chrono_like_now();
+            let previous = store.current();
+            let mut registry = TaskRegistry::from_tasks(&previous.tasks);
+            registry.replace_source_tasks("local-session", watcher.scan(now), now);
+            let mut next = previous.clone();
+            next.tasks = registry.tasks();
+            next.task_counts = registry.counts();
+            next.active_task_count = next.task_counts.needs_action + next.task_counts.running;
+            next.changed_at = Some(now);
+            next.source = Some("local-session".into());
+            store.publish_if_changed(next);
+        }
+    })
+}
+
+pub fn refresh_local_tasks(store: &SnapshotStore, previous: &Snapshot, now: i64) -> Snapshot {
+    let mut watcher = RolloutWatcher::new(default_root());
+    let mut registry = TaskRegistry::from_tasks(&previous.tasks);
+    registry.replace_source_tasks("local-session", watcher.scan(now), now);
+    let mut next = previous.clone();
+    next.tasks = registry.tasks();
+    next.task_counts = registry.counts();
+    next.active_task_count = next.task_counts.needs_action + next.task_counts.running;
+    next.changed_at = Some(now);
+    next.source = Some("manual-refresh".into());
+    store.publish_if_changed(next.clone());
+    next
 }
 
 fn is_metrics_notification(method: &str) -> bool {
@@ -573,8 +579,14 @@ fn apply_task_event(snapshot: &mut Snapshot, event: NormalizedTaskEvent, now: i6
             task.status = status;
         }
         if status == TaskStatus::NeedsAction {
-            task.waiting_reason = task_event.waiting_reason.clone().or(task.waiting_reason.clone());
-            task.approval_request_id = task_event.approval_request_id.clone().or(task.approval_request_id.clone());
+            task.waiting_reason = task_event
+                .waiting_reason
+                .clone()
+                .or(task.waiting_reason.clone());
+            task.approval_request_id = task_event
+                .approval_request_id
+                .clone()
+                .or(task.approval_request_id.clone());
         } else if !keep_approval {
             task.waiting_reason = None;
             task.approval_request_id = None;
@@ -592,6 +604,9 @@ fn apply_task_event(snapshot: &mut Snapshot, event: NormalizedTaskEvent, now: i6
             token_count: task_event.token_count,
             updated_at: task_event.updated_at,
             acknowledged: false,
+            source: Some("app-server-event".into()),
+            turn_id: event.turn_id,
+            received_at: now,
         });
     }
     snapshot.active_task_count = snapshot
@@ -628,28 +643,7 @@ mod tests {
     }
 
     #[test]
-    fn rollout_completion_overrides_running_activity() {
-        let running: serde_json::Value =
-            serde_json::from_str(r#"{"type":"event_msg","payload":{"type":"token_count"}}"#)
-                .unwrap();
-        let completed: serde_json::Value =
-            serde_json::from_str(r#"{"type":"event_msg","payload":{"type":"task_complete"}}"#)
-                .unwrap();
-        assert_eq!(rollout_line_status(&running), Some(TaskStatus::Running));
-        assert_eq!(rollout_line_status(&completed), Some(TaskStatus::Completed));
-    }
-
-    #[test]
-    fn rollout_user_input_is_needs_action() {
-        let value: serde_json::Value = serde_json::from_str(
-            r#"{"type":"response_item","payload":{"type":"custom_tool_call","name":"request_user_input"}}"#,
-        )
-        .unwrap();
-        assert_eq!(rollout_line_status(&value), Some(TaskStatus::NeedsAction));
-    }
-
-    #[test]
-    fn active_thread_prefers_an_explicit_rollout_approval_state() {
+    fn rollout_text_recovers_approval_for_an_active_thread() {
         let path = std::env::temp_dir().join(format!(
             "codex-quota-approval-{}-{}.jsonl",
             std::process::id(),
@@ -679,7 +673,10 @@ mod tests {
         let input = r###"
 {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins>\n- Cloudflare\n</recommended_plugins>"},{"type":"input_text","text":"# AGENTS.md instructions\n<INSTRUCTIONS>...</INSTRUCTIONS>"},{"type":"input_text","text":"<environment_context>...</environment_context>"},{"type":"input_text","text":"\n# Files mentioned by the user:\n\n## My request:\n请修复任务标题识别问题，并重新打包。"}]}}
 "###;
-        assert_eq!(extract_rollout_user_activity(input).as_deref(), Some("请修复任务标题识别问题，并重新打包"));
+        assert_eq!(
+            extract_rollout_user_activity(input).as_deref(),
+            Some("请修复任务标题识别问题，并重新打包")
+        );
     }
 
     #[test]
@@ -688,7 +685,10 @@ mod tests {
 {"type":"response_item","payload":{"type":"message","role":"user","content":"先检查项目"}}
 {"type":"response_item","payload":{"type":"message","role":"user","content":"现在修复任务显示"}}
 "#;
-        assert_eq!(extract_rollout_user_activity(input).as_deref(), Some("现在修复任务显示"));
+        assert_eq!(
+            extract_rollout_user_activity(input).as_deref(),
+            Some("现在修复任务显示")
+        );
     }
 
     #[test]
@@ -719,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn recent_idle_thread_remains_available_for_acceptance() {
+    fn recent_idle_thread_is_metadata_only_until_a_stop_event() {
         let now = chrono_like_now();
         let tasks = map_threads(
             vec![ThreadSummary {
@@ -731,9 +731,23 @@ mod tests {
             }],
             now,
         );
-        assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].status, TaskStatus::Completed);
-        assert!(!tasks[0].acknowledged);
+        assert!(tasks.is_empty());
+    }
+
+    #[test]
+    fn not_loaded_thread_is_not_falsely_marked_completed() {
+        let now = chrono_like_now();
+        let tasks = map_threads(
+            vec![ThreadSummary {
+                id: "thread-not-loaded".into(),
+                title: "未加载任务".into(),
+                status: "notLoaded".into(),
+                updated_at: now,
+                path: None,
+            }],
+            now,
+        );
+        assert!(tasks.is_empty());
     }
 
     #[test]
@@ -759,7 +773,10 @@ mod tests {
             100,
         );
         assert_eq!(snapshot.tasks[0].status, TaskStatus::NeedsAction);
-        assert_eq!(snapshot.tasks[0].waiting_reason.as_deref(), Some("需要批准命令"));
+        assert_eq!(
+            snapshot.tasks[0].waiting_reason.as_deref(),
+            Some("需要批准命令")
+        );
         assert_eq!(snapshot.tasks[0].approval_request_id.as_deref(), Some("41"));
     }
 
@@ -775,6 +792,9 @@ mod tests {
             token_count: None,
             updated_at: 100,
             acknowledged: false,
+            source: None,
+            turn_id: None,
+            received_at: 100,
         }];
         let polled = vec![TaskSummary {
             id: "thread-1".into(),
@@ -786,6 +806,9 @@ mod tests {
             token_count: None,
             updated_at: 101,
             acknowledged: false,
+            source: None,
+            turn_id: None,
+            received_at: 101,
         }];
         let merged = merge_polled_tasks(&previous, polled, 101);
         assert_eq!(merged[0].status, TaskStatus::NeedsAction);
@@ -804,6 +827,9 @@ mod tests {
                 token_count: None,
                 updated_at: 100,
                 acknowledged: false,
+                source: None,
+                turn_id: None,
+                received_at: 100,
             },
             TaskSummary {
                 id: "thread-2".into(),
@@ -815,6 +841,9 @@ mod tests {
                 token_count: None,
                 updated_at: 100,
                 acknowledged: false,
+                source: None,
+                turn_id: None,
+                received_at: 100,
             },
         ];
         let polled = vec![TaskSummary {
@@ -827,6 +856,9 @@ mod tests {
             token_count: None,
             updated_at: 101,
             acknowledged: false,
+            source: None,
+            turn_id: None,
+            received_at: 101,
         }];
         let merged = merge_polled_tasks(&previous, polled, 101);
         assert_eq!(merged.len(), 2);
@@ -845,6 +877,9 @@ mod tests {
             token_count: None,
             updated_at: 100,
             acknowledged: false,
+            source: None,
+            turn_id: None,
+            received_at: 100,
         }];
         let rollout = vec![
             TaskSummary {
@@ -857,6 +892,9 @@ mod tests {
                 token_count: Some(42),
                 updated_at: 101,
                 acknowledged: false,
+                source: Some("history".into()),
+                turn_id: None,
+                received_at: 101,
             },
             TaskSummary {
                 id: "thread-2".into(),
@@ -868,14 +906,16 @@ mod tests {
                 token_count: Some(7),
                 updated_at: 102,
                 acknowledged: false,
+                source: Some("history".into()),
+                turn_id: None,
+                received_at: 102,
             },
         ];
         let merged = merge_rollout_tasks(polled, rollout);
-        assert_eq!(merged.len(), 2);
-        assert_eq!(merged[0].status, TaskStatus::NeedsAction);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].status, TaskStatus::Running);
         assert_eq!(merged[0].title, "旧标题");
         assert_eq!(merged[0].activity.as_deref(), Some("用户第一句话"));
-        assert_eq!(merged[1].id, "thread-2");
     }
 
     #[test]

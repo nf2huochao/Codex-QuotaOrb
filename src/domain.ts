@@ -23,6 +23,24 @@ export interface TaskSummary {
   tokenCount?: number
   updatedAt: number
   acknowledged: boolean
+  source?: string
+  turnId?: string
+  receivedAt?: number
+}
+
+export interface HookDiagnostic {
+  event: string
+  sessionId?: string
+  turnId?: string
+  receivedAt: number
+  httpStatus?: number
+  delivered: boolean
+  error?: string
+}
+
+export interface HookDiagnostics {
+  last?: HookDiagnostic
+  receivedCount: number
 }
 
 export interface UsagePoint {
@@ -53,16 +71,17 @@ export interface Snapshot {
   tasks: TaskSummary[]
   error?: string
   history: UsagePoint[]
+  hookDiagnostics?: HookDiagnostics
   schemaVersion: string
 }
 
-export type SnapshotChanges = Partial<Pick<Snapshot, 'status' | 'changedAt' | 'source' | 'fetchedAt' | 'quotaRemainingPercent' | 'quotaResetsAt' | 'plan' | 'resetCredits' | 'todayTokens' | 'usageDate' | 'activeTaskCount' | 'taskCounts' | 'tasks' | 'error' | 'history' | 'schemaVersion'>>
+export type SnapshotChanges = Partial<Pick<Snapshot, 'status' | 'changedAt' | 'source' | 'fetchedAt' | 'quotaRemainingPercent' | 'quotaResetsAt' | 'plan' | 'resetCredits' | 'todayTokens' | 'usageDate' | 'activeTaskCount' | 'taskCounts' | 'tasks' | 'error' | 'history' | 'hookDiagnostics' | 'schemaVersion'>>
 
 function tasksEqual(left: Snapshot['tasks'], right: Snapshot['tasks']) {
   if (left.length !== right.length) return false
   return left.every((task, index) => {
     const other = right[index]
-    return task.id === other.id && task.title === other.title && task.activity === other.activity && task.waitingReason === other.waitingReason && task.approvalRequestId === other.approvalRequestId && task.status === other.status && task.tokenCount === other.tokenCount && task.updatedAt === other.updatedAt && task.acknowledged === other.acknowledged
+    return task.id === other.id && task.title === other.title && task.activity === other.activity && task.waitingReason === other.waitingReason && task.approvalRequestId === other.approvalRequestId && task.status === other.status && task.tokenCount === other.tokenCount && task.updatedAt === other.updatedAt && task.acknowledged === other.acknowledged && task.source === other.source && task.turnId === other.turnId && task.receivedAt === other.receivedAt
   })
 }
 
@@ -77,6 +96,17 @@ function historyEqual(left: Snapshot['history'], right: Snapshot['history']) {
   })
 }
 
+function hookDiagnosticsEqual(left: Snapshot['hookDiagnostics'], right: Snapshot['hookDiagnostics']) {
+  const a = left ?? { receivedCount: 0 }
+  const b = right ?? { receivedCount: 0 }
+  const lastA = a.last
+  const lastB = b.last
+  if (a.receivedCount !== b.receivedCount) return false
+  if (!lastA && !lastB) return true
+  if (!lastA || !lastB) return false
+  return lastA.event === lastB.event && lastA.sessionId === lastB.sessionId && lastA.turnId === lastB.turnId && lastA.receivedAt === lastB.receivedAt && lastA.httpStatus === lastB.httpStatus && lastA.delivered === lastB.delivered && lastA.error === lastB.error
+}
+
 /** Return only fields that changed so mounted views can update stable DOM nodes. */
 export function diffSnapshot(previous: Snapshot, next: Snapshot): SnapshotChanges {
   const changes: SnapshotChanges = {}
@@ -85,6 +115,7 @@ export function diffSnapshot(previous: Snapshot, next: Snapshot): SnapshotChange
   if (!taskCountsEqual(previous.taskCounts, next.taskCounts)) changes.taskCounts = next.taskCounts
   if (!historyEqual(previous.history, next.history)) changes.history = next.history
   if (!tasksEqual(previous.tasks, next.tasks)) changes.tasks = next.tasks
+  if (!hookDiagnosticsEqual(previous.hookDiagnostics, next.hookDiagnostics)) changes.hookDiagnostics = next.hookDiagnostics
   return changes
 }
 
@@ -126,6 +157,9 @@ export function normalizeSnapshot(input: unknown): Snapshot {
         tokenCount: asNumber(task.tokenCount ?? task.token_count),
         updatedAt: Number(task.updatedAt ?? task.updated_at ?? 0),
         acknowledged: Boolean(task.acknowledged),
+        source: typeof task.source === 'string' ? task.source : undefined,
+        turnId: typeof task.turnId === 'string' ? task.turnId : typeof task.turn_id === 'string' ? task.turn_id : undefined,
+        receivedAt: Number(task.receivedAt ?? task.received_at ?? 0),
       }
     }),
     error: raw.error as string | undefined,
@@ -133,6 +167,22 @@ export function normalizeSnapshot(input: unknown): Snapshot {
       const point = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>
       return { at: Number(point.at ?? 0), quotaRemainingPercent: asNumber(point.quotaRemainingPercent ?? point.quota_remaining_percent) }
     }).filter((point) => point.at > 0) : [],
+    hookDiagnostics: (() => {
+      const value = (raw.hookDiagnostics ?? raw.hook_diagnostics) as Record<string, unknown> | undefined
+      const last = (value?.last && typeof value.last === 'object' ? value.last : undefined) as Record<string, unknown> | undefined
+      return {
+        receivedCount: Number(value?.receivedCount ?? value?.received_count ?? 0),
+        last: last ? {
+          event: String(last.event ?? 'unknown'),
+          sessionId: typeof last.sessionId === 'string' ? last.sessionId : typeof last.session_id === 'string' ? last.session_id : undefined,
+          turnId: typeof last.turnId === 'string' ? last.turnId : typeof last.turn_id === 'string' ? last.turn_id : undefined,
+          receivedAt: Number(last.receivedAt ?? last.received_at ?? 0),
+          httpStatus: asNumber(last.httpStatus ?? last.http_status),
+          delivered: Boolean(last.delivered),
+          error: typeof last.error === 'string' ? last.error : undefined,
+        } : undefined,
+      }
+    })(),
     schemaVersion: String(raw.schemaVersion ?? raw.schema_version ?? '1.0'),
   }
 }

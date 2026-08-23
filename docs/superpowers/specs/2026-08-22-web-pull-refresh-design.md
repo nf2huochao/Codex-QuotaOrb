@@ -13,8 +13,8 @@
 
 ## 实现边界
 
-- 复用 `src/main.ts` 的刷新函数，不新增数据接口。
-- 在 `DetailsPanel` 中提供网页端下拉提示挂载点和触摸监听；刷新按钮及其样式移除。
+- 复用 `web/index.html` 现有的 `refresh()` 函数，不新增数据接口。
+- 在 `web/index.html` 中提供网页端下拉提示挂载点和触摸监听；网页端不增加刷新按钮。
 - 使用 `touchstart`、`touchmove`、`touchend`，并在 `touchmove` 触发时阻止页面回弹，仅在顶部下拉阶段处理。
 - `prefers-reduced-motion` 下仍显示状态文字，但不依赖动画表达状态。
 

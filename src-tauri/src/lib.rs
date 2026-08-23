@@ -3,6 +3,7 @@ pub(crate) mod codex_protocol;
 pub(crate) mod diagnostics;
 pub(crate) mod domain;
 pub(crate) mod hook_bridge;
+pub(crate) mod hook_diagnostics;
 pub(crate) mod lan_server;
 pub(crate) mod poller;
 pub(crate) mod rollout_watcher;
@@ -80,7 +81,10 @@ fn get_pairing_info(state: tauri::State<'_, AppState>) -> lan_server::PairingInf
 
 #[tauri::command]
 fn reset_pairing(state: tauri::State<'_, AppState>) -> Result<lan_server::PairingInfo, String> {
-    let next = lan_server::PairingState { code: lan_server::create_code(), session_token: lan_server::create_token() };
+    let next = lan_server::PairingState {
+        code: lan_server::create_code(),
+        session_token: lan_server::create_token(),
+    };
     lan_server::save(&next, &state.pairing_path)?;
     *state.pairing.write().expect("pairing lock") = next.clone();
     Ok(lan_server::pairing_info(&next))
@@ -93,11 +97,15 @@ fn get_snapshot(state: tauri::State<'_, AppState>) -> domain::Snapshot {
 
 #[tauri::command]
 async fn refresh_now(state: tauri::State<'_, AppState>) -> Result<domain::Snapshot, String> {
-    let Some(client) = state.client.lock().await.clone() else {
-        return Err("Codex app-server 尚未连接".into());
-    };
     let previous = state.store.current();
     let refreshed_at = now();
+    let Some(client) = state.client.lock().await.clone() else {
+        return Ok(poller::refresh_local_tasks(
+            &state.store,
+            &previous,
+            refreshed_at,
+        ));
+    };
     let mut snapshot = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         poller::poll_once(&state.store, &client, &previous, refreshed_at),
@@ -222,11 +230,31 @@ pub fn run() {
             tray::setup_tray(app.handle())?;
             let state = app.state::<AppState>();
             let store = state.store.clone();
+            // Task lifecycle comes from Codex's local session records, not the
+            // app-server child process started by this monitor.
+            let _ = poller::spawn_local_task_loop(store.clone());
             let cache_path = app
                 .path()
                 .app_data_dir()?
                 .join("last-successful-snapshot.json");
-            if let Some(cached) = snapshot_cache::load(&cache_path) {
+            if let Some(mut cached) = snapshot_cache::load(&cache_path) {
+                // A cached snapshot is useful for quota/Token continuity, but
+                // it cannot prove that a task is still live after a restart.
+                // Clear lifecycle status until a fresh Hook or app-server
+                // event arrives instead of showing stale green/yellow/red.
+                for task in &mut cached.tasks {
+                    task.status = domain::TaskStatus::None;
+                    task.waiting_reason = None;
+                    task.approval_request_id = None;
+                    task.source = None;
+                    task.turn_id = None;
+                    task.received_at = 0;
+                }
+                cached.active_task_count = 0;
+                cached.task_counts = domain::TaskCounts::from_tasks(&cached.tasks);
+                cached.status = domain::DataStatus::Stale;
+                cached.error = Some("已恢复历史数据，等待实时状态确认".into());
+                cached.source = Some("cache-unconfirmed".into());
                 store.publish_if_changed(cached);
             }
             let mut snapshot_events = state.store.subscribe();

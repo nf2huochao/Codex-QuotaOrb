@@ -2,12 +2,22 @@ import { Snapshot, STATUS_COLOR, taskStatusCounts, TaskStatus } from '../domain'
 import { ApprovalDecision, renderTaskList } from './TaskList'
 import { MountedView } from './FloatingIsland'
 
-function formatTime(epoch?: number) { return epoch ? new Date(epoch * 1000).toLocaleString('zh-CN', { hour12: false }) : '--' }
+function formatRecentTime(epoch?: number) { return epoch ? new Date(epoch * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--' }
+function formatResetTime(epoch?: number) { return epoch ? new Date(epoch * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '--' }
 function value(value: unknown) { return value === undefined || value === null ? '--' : String(value) }
 function escapeHtml(value: string) { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!)) }
 function taskSignature(snapshot: Snapshot) { return snapshot.tasks.map((task) => `${task.id}:${task.status}:${task.acknowledged}:${task.title}:${task.activity ?? ''}:${task.waitingReason ?? ''}:${task.approvalRequestId ?? ''}:${task.updatedAt}:${task.tokenCount ?? ''}`).join('|') }
 function sourceLabel(source?: Snapshot['source']) { return source === 'app-server-event' ? '实时事件' : source === 'task-watch' ? '任务监听' : source === 'permission-hook' ? '批准监听' : source === 'metrics-poll' ? '指标轮询' : source === 'full-poll' ? '完整校准' : source === 'manual-refresh' ? '手动刷新' : source === 'local-cache' ? '本地缓存' : '' }
-function formatTokens(tokens?: number) { return tokens === undefined ? '--' : tokens >= 1000 ? `${(tokens / 1000).toFixed(tokens >= 1_000_000 ? 0 : 1)}K` : String(tokens) }
+function formatTokens(tokens?: number) {
+  if (tokens === undefined) return '--'
+  if (tokens < 10_000) return String(tokens)
+  if (tokens >= 100_000_000) {
+    const value = tokens / 100_000_000
+    return `${Number(value.toFixed(tokens >= 1_000_000_000 ? 0 : 1))}亿`
+  }
+  const value = tokens / 10_000
+  return `${Number(value.toFixed(tokens >= 1_000_000 ? 0 : 1))}万`
+}
 function renderHistory(root: HTMLElement, snapshot: Snapshot) {
   const start = new Date()
   start.setHours(0, 0, 0, 0)
@@ -107,18 +117,18 @@ export function mountDetailsPanel(
   return {
     update(snapshot) {
       title.textContent = `本周剩余 ${value(snapshot.quotaRemainingPercent)}${snapshot.quotaRemainingPercent === undefined ? '' : '%'}`
-      resetValue.textContent = formatTime(snapshot.quotaResetsAt)
+      resetValue.textContent = formatResetTime(snapshot.quotaResetsAt)
       planValue.textContent = value(snapshot.plan)
       creditsValue.textContent = value(snapshot.resetCredits)
       tokenDetailLabel.textContent = snapshot.usageDate ? `Token · ${snapshot.usageDate.slice(5)}` : '本日 Token'
-      tokensValue.textContent = value(snapshot.todayTokens)
+      tokensValue.textContent = formatTokens(snapshot.todayTokens)
       freshness.className = `freshness ${snapshot.status}`
       const source = sourceLabel(snapshot.source)
       freshness.textContent = snapshot.status === 'fresh'
-        ? `已连接 · 最近更新 ${formatTime(snapshot.fetchedAt)}${source ? ` · ${source}` : ''}`
+        ? `已连接 · 最近更新 ${formatRecentTime(snapshot.fetchedAt)}${source ? ` · ${source}` : ''}`
         : snapshot.status === 'stale'
-          ? `${snapshot.error ?? '数据已过期'} · 正在重连 · 保留最后成功数据 · 最后成功于 ${formatTime(snapshot.fetchedAt)}${source ? ` · ${source}` : ''}`
-          : `${snapshot.error ?? '暂时无法读取数据'} · 保留最后成功数据 · 最后成功于 ${formatTime(snapshot.fetchedAt)}`
+          ? `${snapshot.error ?? '数据已过期'} · 正在重连 · 保留最后成功数据 · 最后成功于 ${formatRecentTime(snapshot.fetchedAt)}${source ? ` · ${source}` : ''}`
+          : `${snapshot.error ?? '暂时无法读取数据'} · 保留最后成功数据 · 最后成功于 ${formatRecentTime(snapshot.fetchedAt)}`
       const signature = taskSignature(snapshot)
       if (signature !== lastTaskSignature) {
         renderTaskList(taskList, snapshot.tasks, onAcknowledge, onApproval)
