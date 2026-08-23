@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { diffSnapshot, mapTaskStatus, normalizeSnapshot, snapshotStatus } from './domain'
+import { diffSnapshot, mapTaskStatus, normalizeSnapshot, snapshotStatus, taskStatusCounts } from './domain'
 
 describe('task status mapping', () => {
   it('prioritises user action over running', () => {
@@ -36,6 +36,25 @@ describe('snapshot transport', () => {
     expect(snapshot.todayTokens).toBeUndefined()
     expect(snapshot.tasks[0].tokenCount).toBeUndefined()
   })
+  it('normalizes canonical task counts from the backend', () => {
+    const snapshot = normalizeSnapshot({ task_counts: { none: 0, needs_action: 1, running: 2, completed: 3 }, tasks: [] })
+    expect(snapshot.taskCounts).toEqual({ none: 0, needsAction: 1, running: 2, completed: 3 })
+  })
+  it('derives display counts from the same task rows shown in details', () => {
+    const snapshot = normalizeSnapshot({ task_counts: { none: 0, needs_action: 0, running: 1, completed: 0 }, tasks: [
+      { id: 'run-1', status: 'running', acknowledged: false },
+      { id: 'run-2', status: 'running', acknowledged: false },
+    ] })
+    expect(taskStatusCounts(snapshot.tasks)).toEqual({ none: 0, needs_action: 0, running: 2, completed: 0 })
+  })
+  it('counts an acknowledged task again if Codex reports it running', () => {
+    const snapshot = normalizeSnapshot({ tasks: [{ id: 'run', status: 'running', acknowledged: true }] })
+    expect(taskStatusCounts(snapshot.tasks)).toEqual({ none: 0, needs_action: 0, running: 1, completed: 0 })
+  })
+  it('normalizes quota-only hourly history points', () => {
+    const snapshot = normalizeSnapshot({ history: [{ at: 100, quota_remaining_percent: 72, today_tokens: 999 }] })
+    expect(snapshot.history).toEqual([{ at: 100, quotaRemainingPercent: 72 }])
+  })
 })
 
 describe('snapshot diff', () => {
@@ -46,9 +65,19 @@ describe('snapshot diff', () => {
   it('returns an empty diff for identical snapshots', () => {
     expect(diffSnapshot(base, { ...base })).toEqual({})
   })
+  it('does not treat freshly normalized equal counts as a change', () => {
+    const next = normalizeSnapshot({ status: 'fresh', quota_remaining_percent: 72, today_tokens: 1, active_task_count: 0, task_counts: { none: 0, needs_action: 0, running: 0, completed: 0 }, tasks: [], schema_version: '1.0' })
+    expect(diffSnapshot(base, next)).toEqual({})
+  })
   it('includes task rows when task state changes', () => {
     const tasks = [{ id: 't', title: 'Task', status: 'running' as const, updatedAt: 1, acknowledged: false }]
     const next = { ...base, activeTaskCount: 1, tasks }
     expect(diffSnapshot(base, next)).toEqual({ activeTaskCount: 1, tasks })
+  })
+  it('includes task rows when the current activity changes', () => {
+    const task = { id: 't', title: 'Task', activity: '第一步', status: 'running' as const, updatedAt: 1, acknowledged: false }
+    const next = { ...base, activeTaskCount: 1, tasks: [task] }
+    const updated = { ...next, tasks: [{ ...task, activity: '第二步' }] }
+    expect(diffSnapshot(next, updated)).toEqual({ tasks: updated.tasks })
   })
 })

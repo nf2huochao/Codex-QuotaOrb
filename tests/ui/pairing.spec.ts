@@ -48,7 +48,83 @@ test('paired page keeps the last snapshot when the connection drops', async ({ p
   await page.route('**/api/snapshot**', (route) => route.abort())
   await page.goto('/web/index.html')
   await expect(page.locator('#island')).toContainText('72%')
-  await expect(page.locator('#island')).toContainText('1 个任务已完成')
+  await expect(page.locator('#island .task-count[data-status="completed"] b')).toHaveText('1')
   await expect(page.locator('.fresh')).toContainText('正在重连')
   await expect(page.locator('#island')).toContainText('72%')
+})
+
+test('web island keeps dot counts separate from the details task summary', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('codex-pair-token:http://127.0.0.1:4173', 'session-token')
+  })
+  await page.route('**/api/snapshot**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'fresh', changed_at: 100, fetched_at: 100, quota_remaining_percent: 72, today_tokens: 1234,
+        tasks: [{ id: 'run', title: '对话标题', activity: '正在执行的任务', status: 'running', acknowledged: false }], schema_version: '1.0',
+      }),
+    })
+  })
+  await page.goto('/web/index.html')
+  await expect(page.locator('#island .task-counts .task-count b')).toHaveText('1')
+  await expect(page.locator('#island .task-counts')).not.toContainText('活跃任务')
+  await expect(page.locator('.task-summary .task-count[data-status="running"] b')).toHaveText('1')
+  await expect(page.locator('#tasks .task strong')).toHaveText('对话标题')
+  await expect(page.locator('#tasks .task .task-activity')).toContainText('正在执行的任务')
+})
+
+test('web island and details use the same complete task set', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('codex-pair-token:http://127.0.0.1:4173', 'session-token')
+  })
+  await page.route('**/api/snapshot**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'fresh', changed_at: 100, fetched_at: 100, quota_remaining_percent: 72, today_tokens: 1234,
+        tasks: [
+          { id: 'action', title: '需要确认', status: 'needs_action', approval_request_id: '1', acknowledged: false },
+          { id: 'run-1', title: '执行一', status: 'running', acknowledged: false },
+          { id: 'run-2', title: '执行二', status: 'running', acknowledged: false },
+          { id: 'run-3', title: '执行三', status: 'running', acknowledged: false },
+          { id: 'done', title: '已完成', status: 'completed', acknowledged: false },
+        ], schema_version: '1.0',
+      }),
+    })
+  })
+  await page.goto('/web/index.html')
+  await expect(page.locator('#island .task-count[data-status="needs_action"] b')).toHaveText('1')
+  await expect(page.locator('#island .task-count[data-status="running"] b')).toHaveText('3')
+  await expect(page.locator('#island .task-count[data-status="completed"] b')).toHaveText('1')
+  await expect(page.locator('.task-summary .task-count[data-status="needs_action"] b')).toHaveText('1')
+  await expect(page.locator('.task-summary .task-count[data-status="running"] b')).toHaveText('3')
+  await expect(page.locator('.task-summary .task-count[data-status="completed"] b')).toHaveText('1')
+  await expect(page.locator('#tasks .task')).toHaveCount(5)
+})
+
+test('web island count follows the visible detail task rows after a task runs again', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('codex-pair-token:http://127.0.0.1:4173', 'session-token')
+  })
+  await page.route('**/api/snapshot**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'fresh', changed_at: 100, fetched_at: 100, quota_remaining_percent: 72,
+        task_counts: { none: 0, needs_action: 0, running: 1, completed: 0 },
+        tasks: [
+          { id: 'run-again', title: '重新运行', status: 'running', acknowledged: true },
+          { id: 'run-now', title: '当前运行', status: 'running', acknowledged: false },
+        ], schema_version: '1.0',
+      }),
+    })
+  })
+  await page.goto('/web/index.html')
+  await expect(page.locator('#island .task-count[data-status="running"] b')).toHaveText('2')
+  await expect(page.locator('.task-summary .task-count[data-status="running"] b')).toHaveText('2')
+  await expect(page.locator('#tasks .task')).toHaveCount(2)
 })
