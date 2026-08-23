@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.6"
+version = "0.1.7"
 description = "Codex quota floating window for Windows"
 authors = ["nf2huochao"]
 license = ""
@@ -33,7 +33,10 @@ axum = { version = "0.8", features = ["ws"] }
 uuid = { version = "1", features = ["v4"] }
 tower = { version = "0.5", features = ["util"] }
 futures-util = "0.3"
-time = { version = "0.3", features = ["formatting"] }
+time = { version = "0.3", features = ["formatting", "parsing", "local-offset"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
+
+[dev-dependencies]
+tempfile = "3"

@@ -2,10 +2,14 @@ pub(crate) mod codex_client;
 pub(crate) mod codex_protocol;
 pub(crate) mod diagnostics;
 pub(crate) mod domain;
+pub(crate) mod hook_bridge;
+pub(crate) mod hook_diagnostics;
 pub(crate) mod lan_server;
 pub(crate) mod poller;
+pub(crate) mod rollout_watcher;
 pub(crate) mod snapshot_cache;
 pub(crate) mod snapshot_store;
+pub(crate) mod task_registry;
 pub(crate) mod tray;
 
 use snapshot_store::{empty_snapshot, SnapshotStore};
@@ -21,6 +25,7 @@ pub struct AppState {
     pub client: Arc<AsyncMutex<Option<Arc<codex_client::CodexClient>>>>,
     pub pairing: Arc<RwLock<lan_server::PairingState>>,
     pub pairing_path: PathBuf,
+    pub hook_bridge: hook_bridge::HookBridge,
 }
 
 #[derive(serde::Serialize)]
@@ -76,7 +81,10 @@ fn get_pairing_info(state: tauri::State<'_, AppState>) -> lan_server::PairingInf
 
 #[tauri::command]
 fn reset_pairing(state: tauri::State<'_, AppState>) -> Result<lan_server::PairingInfo, String> {
-    let next = lan_server::PairingState { code: lan_server::create_code(), session_token: lan_server::create_token() };
+    let next = lan_server::PairingState {
+        code: lan_server::create_code(),
+        session_token: lan_server::create_token(),
+    };
     lan_server::save(&next, &state.pairing_path)?;
     *state.pairing.write().expect("pairing lock") = next.clone();
     Ok(lan_server::pairing_info(&next))
@@ -89,11 +97,15 @@ fn get_snapshot(state: tauri::State<'_, AppState>) -> domain::Snapshot {
 
 #[tauri::command]
 async fn refresh_now(state: tauri::State<'_, AppState>) -> Result<domain::Snapshot, String> {
-    let Some(client) = state.client.lock().await.clone() else {
-        return Err("Codex app-server 尚未连接".into());
-    };
     let previous = state.store.current();
     let refreshed_at = now();
+    let Some(client) = state.client.lock().await.clone() else {
+        return Ok(poller::refresh_local_tasks(
+            &state.store,
+            &previous,
+            refreshed_at,
+        ));
+    };
     let mut snapshot = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         poller::poll_once(&state.store, &client, &previous, refreshed_at),
@@ -103,6 +115,44 @@ async fn refresh_now(state: tauri::State<'_, AppState>) -> Result<domain::Snapsh
     snapshot.changed_at = Some(refreshed_at);
     snapshot.source = Some("manual-refresh".into());
     Ok(snapshot)
+}
+
+#[tauri::command]
+async fn respond_to_approval(
+    task_id: String,
+    decision: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    if !matches!(decision.as_str(), "accept" | "decline") {
+        return Err("批准决定无效".into());
+    }
+    let request_id = state
+        .store
+        .current()
+        .tasks
+        .into_iter()
+        .find(|task| task.id == task_id)
+        .and_then(|task| task.approval_request_id)
+        .ok_or_else(|| "任务当前没有待处理的批准请求".to_owned())?;
+    if request_id.starts_with("hook:") {
+        if state.hook_bridge.resolve(&request_id, &decision).await {
+            state.store.resolve_approval(&task_id, &decision);
+            return Ok(());
+        }
+        return Err("批准请求已失效或已处理".into());
+    }
+    let client = state
+        .client
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Codex app-server 尚未连接".to_owned())?;
+    client
+        .respond_to_approval(&request_id, &decision)
+        .await
+        .map_err(|error| error.to_string())?;
+    state.store.resolve_approval(&task_id, &decision);
+    Ok(())
 }
 
 #[tauri::command]
@@ -118,7 +168,9 @@ fn set_window_expanded(
     window: tauri::Window,
 ) -> Result<(), String> {
     let height = if expanded {
-        height.unwrap_or(440.0).clamp(360.0, 820.0)
+        // Leave enough room for the trend card, task list and refresh action.
+        // The task list still scrolls when it exceeds the available screen area.
+        height.unwrap_or(440.0).clamp(360.0, 1100.0)
     } else {
         height.unwrap_or(120.0).clamp(96.0, 220.0)
     };
@@ -134,6 +186,7 @@ mod codex_client_tests;
 pub fn run() {
     let (store, _) = SnapshotStore::new(empty_snapshot());
     let client = Arc::new(AsyncMutex::new(None));
+    let hook_bridge = hook_bridge::HookBridge::default();
     let pairing_path = std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
@@ -160,6 +213,7 @@ pub fn run() {
             client,
             pairing: Arc::clone(&pairing),
             pairing_path,
+            hook_bridge: hook_bridge.clone(),
         })
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
@@ -169,17 +223,38 @@ pub fn run() {
             relaunch_app,
             refresh_now,
             acknowledge_task,
+            respond_to_approval,
             set_window_expanded
         ])
         .setup(move |app| {
             tray::setup_tray(app.handle())?;
             let state = app.state::<AppState>();
             let store = state.store.clone();
+            // Task lifecycle comes from Codex's local session records, not the
+            // app-server child process started by this monitor.
+            let _ = poller::spawn_local_task_loop(store.clone());
             let cache_path = app
                 .path()
                 .app_data_dir()?
                 .join("last-successful-snapshot.json");
-            if let Some(cached) = snapshot_cache::load(&cache_path) {
+            if let Some(mut cached) = snapshot_cache::load(&cache_path) {
+                // A cached snapshot is useful for quota/Token continuity, but
+                // it cannot prove that a task is still live after a restart.
+                // Clear lifecycle status until a fresh Hook or app-server
+                // event arrives instead of showing stale green/yellow/red.
+                for task in &mut cached.tasks {
+                    task.status = domain::TaskStatus::None;
+                    task.waiting_reason = None;
+                    task.approval_request_id = None;
+                    task.source = None;
+                    task.turn_id = None;
+                    task.received_at = 0;
+                }
+                cached.active_task_count = 0;
+                cached.task_counts = domain::TaskCounts::from_tasks(&cached.tasks);
+                cached.status = domain::DataStatus::Stale;
+                cached.error = Some("已恢复历史数据，等待实时状态确认".into());
+                cached.source = Some("cache-unconfirmed".into());
                 store.publish_if_changed(cached);
             }
             let mut snapshot_events = state.store.subscribe();
@@ -193,7 +268,12 @@ pub fn run() {
                     let _ = event_handle.emit("snapshot-updated", snapshot);
                 }
             });
-            let _ = lan_server::spawn(store.clone(), Arc::clone(&pairing));
+            let _ = lan_server::spawn(
+                store.clone(),
+                Arc::clone(&pairing),
+                Arc::clone(&state.client),
+                hook_bridge.clone(),
+            );
             let client_slot = Arc::clone(&state.client);
             let codex_binary = codex_binary.clone();
             tauri::async_runtime::spawn(async move {

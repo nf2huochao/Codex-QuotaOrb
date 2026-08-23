@@ -38,7 +38,13 @@ pub struct ThreadSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NormalizedTaskEvent {
     pub id: String,
+    pub turn_id: Option<String>,
+    pub item_id: Option<String>,
+    pub request_id: Option<String>,
+    pub resolved_request_id: Option<String>,
     pub title: String,
+    pub waiting_reason: Option<String>,
+    pub approval_request_id: Option<String>,
     pub waiting_for_user: bool,
     pub running: bool,
     pub completed: bool,
@@ -198,8 +204,12 @@ pub fn parse_threads(input: &str) -> Result<Vec<ThreadSummary>, ProtocolError> {
                 .collect::<String>();
             let status = thread
                 .get("status")
-                .and_then(|value| value.get("type"))
-                .and_then(Value::as_str)
+                .and_then(|value| {
+                    value
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .or_else(|| value.as_str())
+                })
                 .unwrap_or("notLoaded")
                 .to_owned();
             let updated_at =
@@ -224,10 +234,12 @@ pub fn parse_event_line(input: &str) -> Result<NormalizedTaskEvent, ProtocolErro
     let params = root.get("params").unwrap_or(&root);
     let thread = params.get("thread");
     let id = params
-        .get("id")
-        .or_else(|| params.get("thread_id"))
+        .get("thread_id")
         .or_else(|| params.get("threadId"))
+        .or_else(|| params.get("id"))
         .or_else(|| params.get("turnId"))
+        .or_else(|| params.get("item").and_then(|item| item.get("threadId")))
+        .or_else(|| params.get("item").and_then(|item| item.get("thread_id")))
         .and_then(Value::as_str)
         .or_else(|| {
             thread
@@ -255,42 +267,88 @@ pub fn parse_event_line(input: &str) -> Result<NormalizedTaskEvent, ProtocolErro
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_ascii_lowercase();
+    let request_id = root.get("id").map(|value| {
+        value
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| value.to_string())
+    });
+    let approval_request_id = request_id.clone().filter(|_| {
+        kind.contains("approval")
+            || kind.contains("requestuserinput")
+            || kind.contains("elicitation/request")
+    });
+    let resolved_request_id = params
+        .get("requestId")
+        .or_else(|| params.get("request_id"))
+        .and_then(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .or_else(|| Some(value.to_string()))
+        })
+        .filter(|_| kind.contains("serverrequest/resolved") || kind.contains("request/resolved"));
+    let turn_id = params
+        .get("turnId")
+        .or_else(|| params.get("turn_id"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let item_id = params
+        .get("itemId")
+        .or_else(|| params.get("item_id"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let waiting_reason = params
+        .get("reason")
+        .or_else(|| params.get("message"))
+        .or_else(|| params.get("command"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let status_type = params
         .get("status")
         .and_then(|value| value.get("type").unwrap_or(value).as_str())
         .unwrap_or("")
         .to_ascii_lowercase();
+    let approval_method = matches!(
+        kind.as_str(),
+        "approval_required"
+            | "item/commandexecution/requestapproval"
+            | "item/tool/requestuserinput"
+            | "serverrequest/approval"
+            | "elicitation/request"
+    );
+    let completed_method = matches!(
+        kind.as_str(),
+        "turn/completed" | "turn/complete" | "thread/completed"
+    );
+    let running_method = matches!(
+        kind.as_str(),
+        "turn/started" | "turn/progress" | "turn/updated" | "thread/status/changed"
+    );
     let waiting_for_user = params
         .get("waiting_for_user")
         .or_else(|| params.get("waitingForUser"))
         .and_then(Value::as_bool)
         .unwrap_or(false)
-        || kind.contains("approval")
-        || kind.contains("question")
-        || kind.contains("input");
+        || approval_method;
     let completed = params
         .get("completed")
         .and_then(Value::as_bool)
         .unwrap_or(false)
-        || kind.contains("completed")
-        || kind.contains("done")
-        || kind.contains("closed")
-        || status_type.contains("completed")
-        || status_type.contains("idle")
-        || status_type.contains("notloaded")
-        || status_type.contains("not_loaded");
+        || completed_method
+        || matches!(
+            status_type.as_str(),
+            "completed" | "complete" | "done" | "idle"
+        );
     let running = params
         .get("running")
         .and_then(Value::as_bool)
         .unwrap_or(false)
-        || kind.contains("started")
-        || kind.contains("progress")
-        || kind.contains("running")
-        || kind.contains("tokenusage")
-        || status_type.contains("active")
-        || status_type.contains("running")
-        || status_type.contains("inprogress")
-        || status_type.contains("in_progress");
+        || running_method
+        || matches!(
+            status_type.as_str(),
+            "active" | "running" | "inprogress" | "in_progress"
+        );
     let token_count = as_u64(
         params
             .get("token_count")
@@ -322,7 +380,13 @@ pub fn parse_event_line(input: &str) -> Result<NormalizedTaskEvent, ProtocolErro
     .unwrap_or(0);
     Ok(NormalizedTaskEvent {
         id,
+        turn_id,
+        item_id,
+        request_id,
+        resolved_request_id,
         title,
+        waiting_reason,
+        approval_request_id,
         waiting_for_user,
         running,
         completed,
