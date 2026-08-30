@@ -29,18 +29,10 @@ fn merge_hourly_history(
     let Some(quota) = quota else {
         return previous.to_vec();
     };
-    let Some((bucket, date)) = local_hour_bucket(at) else {
+    let Some((bucket, _date)) = local_hour_bucket(at) else {
         return previous.to_vec();
     };
-    let mut history: Vec<UsagePoint> = previous
-        .iter()
-        .filter(|point| {
-            local_hour_bucket(point.at)
-                .map(|(_, point_date)| point_date == date)
-                .unwrap_or(false)
-        })
-        .cloned()
-        .collect();
+    let mut history: Vec<UsagePoint> = previous.to_vec();
     if let Some(point) = history.iter_mut().find(|point| point.at == bucket) {
         point.quota_remaining_percent = Some(quota);
     } else {
@@ -50,8 +42,8 @@ fn merge_hourly_history(
         });
     }
     history.sort_by_key(|point| point.at);
-    if history.len() > 24 {
-        history.drain(0..history.len() - 24);
+    if history.len() > 168 {
+        history.drain(0..history.len() - 168);
     }
     history
 }
@@ -405,24 +397,26 @@ mod tests {
     }
 
     #[test]
-    fn hourly_history_keeps_only_current_day_and_24_buckets() {
+    fn hourly_history_keeps_a_rolling_seven_day_window() {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         let hour = now - now.rem_euclid(3600);
         let mut history = Vec::new();
-        for index in 0..30 {
+        for index in 0..200 {
             history = merge_hourly_history(
                 &history,
-                Some(hour - (29 - index) * 3600),
+                Some(hour - (199 - index) * 3600),
                 Some(index as u8),
             );
         }
-        assert!(history.len() <= 24);
-        assert!(history
-            .iter()
-            .all(|point| local_hour_bucket(point.at).unwrap().1
-                == local_hour_bucket(hour).unwrap().1));
+        assert_eq!(history.len(), 168);
+        assert!(history.windows(2).all(|points| points[0].at < points[1].at));
+        assert_eq!(history.last().map(|point| point.at), Some(local_hour_bucket(hour).unwrap().0));
+        assert_eq!(history.first().map(|point| point.at), Some(local_hour_bucket(hour - 167 * 3600).unwrap().0));
+        let replaced = merge_hourly_history(&history, Some(hour - 10), Some(99));
+        assert_eq!(replaced.len(), 168);
+        assert_eq!(replaced.iter().find(|point| point.at == local_hour_bucket(hour - 10).unwrap().0).and_then(|point| point.quota_remaining_percent), Some(99));
     }
 }
