@@ -9,8 +9,13 @@ const app = document.querySelector<HTMLMainElement>('#app')
 if (!app) throw new Error('app root is missing')
 
 const designPreview = new URLSearchParams(window.location.search).has('design-preview')
+const previewNow = Math.floor(Date.now() / 1000)
+const previewHistory = Array.from({ length: 168 }, (_, index) => ({
+  at: previewNow - (167 - index) * 3600,
+  quotaRemainingPercent: Math.max(22, 81 - Math.floor(index / 24) * 3),
+}))
 const fallback: Snapshot = designPreview
-  ? { status: 'fresh', fetchedAt: Math.floor(Date.now() / 1000), quotaRemainingPercent: 22, todayTokens: 0, tasks: [], taskCounts: { none: 0, needsAction: 0, running: 0, completed: 0 }, activeTaskCount: 0, history: [], schemaVersion: '1.0' }
+  ? { status: 'fresh', fetchedAt: previewNow, quotaRemainingPercent: 81, fiveHourRemainingPercent: 67, quotaResetsAt: previewNow + 3 * 3600, fiveHourResetsAt: previewNow + 2 * 3600, plan: 'Plus', resetCredits: 0, todayTokens: 54030000, tasks: [], taskCounts: { none: 0, needsAction: 0, running: 0, completed: 0 }, activeTaskCount: 0, history: previewHistory, schemaVersion: '1.0' }
   : { status: 'stale', tasks: [], taskCounts: { none: 0, needsAction: 0, running: 0, completed: 0 }, activeTaskCount: 0, history: [], schemaVersion: '1.0', error: '等待连接 Codex app-server' }
 let snapshot = fallback
 type ViewState = 'ball' | 'summary' | 'details'
