@@ -123,6 +123,9 @@ export function mountDetailsPanel(
   let currentPairingInfo = pairingInfo
   let visibleHistoryHours = 24
   let historySnapshot: Snapshot | undefined
+  let dragScroll: HTMLElement | undefined
+  let dragStartX = 0
+  let dragStartLeft = 0
 
   pairingButton.addEventListener('click', () => onTogglePairing?.())
   refreshButton.addEventListener('click', onRefresh)
@@ -137,6 +140,27 @@ export function mountDetailsPanel(
       renderHistory(historyContent, historySnapshot, visibleHistoryHours)
     }
   }, { passive: false })
+  historyCard.addEventListener('pointerdown', (event) => {
+    const scroll = (event.target as HTMLElement).closest<HTMLElement>('.history-scroll')
+    if (!scroll || event.button !== 0) return
+    dragScroll = scroll
+    dragStartX = event.clientX
+    dragStartLeft = scroll.scrollLeft
+    scroll.classList.add('is-dragging')
+    scroll.setPointerCapture?.(event.pointerId)
+  })
+  historyCard.addEventListener('pointermove', (event) => {
+    if (!dragScroll) return
+    dragScroll.scrollLeft = dragStartLeft - (event.clientX - dragStartX)
+  })
+  const stopHistoryDrag = (event: PointerEvent) => {
+    if (!dragScroll) return
+    dragScroll.classList.remove('is-dragging')
+    dragScroll.releasePointerCapture?.(event.pointerId)
+    dragScroll = undefined
+  }
+  historyCard.addEventListener('pointerup', stopHistoryDrag)
+  historyCard.addEventListener('pointercancel', stopHistoryDrag)
   if (onAdvance) panel.addEventListener('dblclick', (event) => {
     if ((event.target as HTMLElement).closest('button')) return
     onAdvance()
