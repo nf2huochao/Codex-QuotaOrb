@@ -38,24 +38,27 @@
     const storageKey='codex-pair-token:'+location.origin;
     const color={none:'#a8ada3',needs_action:'#c96e63',running:'#d6a85e',completed:'#87a56e'};
     const PULL_THRESHOLD=52;
-    let token=localStorage.getItem(storageKey)||'',latestSnapshot,lastSignature='',reconnectTimer,reconnectDelay=1000,socket,lastChangedAt=-1,lastTransportRank=0,pullStartY=0,pullDistance=0,pulling=false,refreshing=false;
+    let token=localStorage.getItem(storageKey)||'',latestSnapshot,lastSignature='',reconnectTimer,reconnectDelay=1000,socket,lastChangedAt=-1,lastTransportRank=0,pullStartY=0,pullDistance=0,pulling=false,refreshing=false,visibleHistoryHours=24;
     const pullRefresh=document.querySelector('#pull-refresh');
     const esc=s=>String(s??'--').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const fmt=x=>x?new Date(x*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):'--';
     const fmtReset=x=>x?new Date(x*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}):'--';
     const fmtDate=x=>x?new Date(x*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric'}):'--';
+    const historyWindowLabel=hours=>hours<=24?'当天采样':'最近 '+Math.ceil(hours/24)+' 天';
     const sourceLabel=source=>source==='app-server-event'?'实时事件':source==='task-watch'?'任务监听':source==='permission-hook'?'批准监听':source==='metrics-poll'?'指标轮询':source==='full-poll'?'完整校准':source==='manual-refresh'?'手动刷新':'';
     const taskStatusCounts=tasks=>tasks.reduce((counts,task)=>{if(!(task.acknowledged&&task.status==='completed')){const status=task.status||'none';if(status in counts)counts[status]++}return counts},{none:0,needs_action:0,running:0,completed:0});
     const statusLabel=status=>({none:'无活跃任务',needs_action:'需要批准 / 回复 / 确认',running:'正在执行',completed:'已完成，可验收'})[status]||'状态未知';
     const formatTokens=value=>{if(value===undefined||value===null)return '--';if(value<10000)return String(value);if(value>=100000000){const yi=value/100000000;return Number(yi.toFixed(value>=1000000000?'0':'1'))+'亿'}const wan=value/10000;return Number(wan.toFixed(value>=1000000?'0':'1'))+'万'};
     function renderHistory(points){
-      const normalized=(points||[]).map(point=>({at:Number(point.at??point.timestamp??0),quota:point.quota_remaining_percent??point.quotaRemainingPercent})).filter(point=>point.at).sort((a,b)=>a.at-b.at).slice(-168);
+      const sorted=(points||[]).map(point=>({at:Number(point.at??point.timestamp??0),quota:point.quota_remaining_percent??point.quotaRemainingPercent})).filter(point=>point.at).sort((a,b)=>a.at-b.at);
+      const today=new Date();today.setHours(0,0,0,0);const normalized=visibleHistoryHours<=24?sorted.filter(point=>point.at>=Math.floor(today.getTime()/1000)):sorted.slice(-visibleHistoryHours);
       const windowLabel=document.querySelector('.history-window'),content=document.querySelector('.history-content');
       const values=normalized.map(point=>Number(point.quota??0)),max=Math.max(1,...values),first=normalized.find(point=>point.quota!==undefined)?.quota,last=[...normalized].reverse().find(point=>point.quota!==undefined)?.quota;
       const bars=normalized.length?normalized.map((point,index)=>{const date=new Date(point.at*1000),label=`${date.getMonth()+1}/${date.getDate()} ${String(date.getHours()).padStart(2,'0')}:00`;return `<i class="history-slot has-value" style="height:${Math.max(8,(values[index]/max)*100)}%" title="${label} · ${point.quota??'--'}%"></i>`}).join(''):Array.from({length:24},(_,index)=>`<i class="history-slot" style="height:4%" title="${index}:00 · 暂无数据"></i>`).join('');
-      windowLabel.textContent='最近 7 天';
-      content.innerHTML=`<div class="history-summary"><span>额度 ${first??'--'}% → ${last??'--'}%</span><span>${normalized.length?'已保存最近 7 天':'暂无成功采样'}</span></div><div class="history-scroll"><div class="history-track" aria-label="最近 7 天每小时额度趋势">${bars}</div></div>`;
+      windowLabel.textContent=historyWindowLabel(visibleHistoryHours);
+      content.innerHTML=`<div class="history-summary"><span>周额度 ${first??'--'}% → ${last??'--'}%</span><span>${normalized.length?(visibleHistoryHours<=24?'今日已采样':'已保存最近 7 天'):'暂无成功采样'}</span></div><div class="history-scroll"><div class="history-track" aria-label="${historyWindowLabel(visibleHistoryHours)}每小时周额度趋势">${bars}</div></div>`;
     }
+    document.querySelector('.history-card').addEventListener('wheel',event=>{const direction=event.deltaY<0?1:-1,next=Math.max(24,Math.min(168,visibleHistoryHours+direction*24));if(next===visibleHistoryHours)return;event.preventDefault();visibleHistoryHours=next;renderHistory(latestSnapshot?.history||[])} ,{passive:false});
     function showPairing(message=''){dashboard.hidden=true;pairing.hidden=false;document.querySelector('#pair-error').textContent=message}
     function showDashboard(){pairing.hidden=true;dashboard.hidden=false}
     function extractCode(raw){const value=raw.trim();try{const url=new URL(value,location.href);return url.searchParams.get('pair')||value}catch{return value}}

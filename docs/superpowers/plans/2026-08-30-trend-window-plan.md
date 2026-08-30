@@ -26,15 +26,15 @@
 - `renderHistory(root, snapshot, visibleHours)` 渲染排序后的历史尾部窗口。
 - 趋势卡片监听 `wheel`，将可见小时数限制在 24 到 168。
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 在现有详情面板测试中加入 168 点历史，断言首次显示 24 根柱、滚轮展开后显示 48 根，继续展开最多 168 根。
 
-- [ ] **Step 2: Implement the view state**
+- [x] **Step 2: Implement the view state**
 
 在 `mountDetailsPanel` 内增加 `visibleHistoryHours = 24`，将其传给 `renderHistory`；在 `.history-card` 上监听 `wheel`，按 `Math.min(168, current + 24)` 或 `Math.max(24, current - 24)` 更新并重绘。
 
-- [ ] **Step 3: Run focused tests**
+- [x] **Step 3: Run focused tests**
 
 运行 `npm test -- --run src/components/FloatingIsland.test.ts`，确认趋势窗口和既有任务测试通过。
 
@@ -48,15 +48,15 @@
 **Interfaces:**
 - 网页端 `renderHistory` 使用 `visibleHistoryHours`，初始为 24，滚轮范围为 24–168。
 
-- [ ] **Step 1: Add the wheel state and listener**
+- [x] **Step 1: Add the wheel state and listener**
 
 在网页脚本中增加 `let visibleHistoryHours=24`，趋势渲染按排序后 `slice(-visibleHistoryHours)`；为 `.history-card` 注册 `wheel` 监听，变化后调用 `renderHistory(latestSnapshot?.history||[])` 并阻止页面滚动。
 
-- [ ] **Step 2: Update labels**
+- [x] **Step 2: Update labels**
 
 当天窗口显示“当天采样”，展开后显示“最近 2 天”至“最近 7 天”；摘要继续显示首尾额度。
 
-- [ ] **Step 3: Run build**
+- [x] **Step 3: Run build**
 
 运行 `npm run build`，确认网页脚本和桌面端类型检查通过。
 
@@ -67,10 +67,10 @@
 **Files:**
 - Modify: none
 
-- [ ] **Step 1: Run all tests**
+- [x] **Step 1: Run all tests**
 
 运行 `npm test` 和 `cargo test --manifest-path src-tauri/Cargo.toml`。
 
-- [ ] **Step 2: Audit scope**
+- [x] **Step 2: Audit scope**
 
 确认本次差异只涉及趋势渲染、滚轮交互和测试，不包含任务、Token、配对、重置机会或套餐识别代码。
