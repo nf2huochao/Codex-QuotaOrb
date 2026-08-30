@@ -22,41 +22,50 @@ function formatTokens(tokens?: number) {
   const value = tokens / 10_000
   return `${Number(value.toFixed(tokens >= 1_000_000 ? 0 : 1))}万`
 }
-function historyWindowLabel(hours: number) { return hours <= 24 ? '当天采样' : `最近 ${Math.ceil(hours / 24)} 天` }
-function renderHistory(root: HTMLElement, snapshot: Snapshot, visibleHours = 24) {
-  const sorted = [...snapshot.history].sort((left, right) => left.at - right.at)
+const HISTORY_DAYS = 7
+const HOURS_PER_DAY = 24
+
+function historyHourKey(date: Date) {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}`
+}
+
+function renderHistory(root: HTMLElement, snapshot: Snapshot) {
   const now = new Date()
   const today = new Date(now)
   today.setHours(0, 0, 0, 0)
-  const todayStart = Math.floor(today.getTime() / 1000)
-  const currentHour = new Date(now)
-  currentHour.setMinutes(0, 0, 0)
-  const currentHourAt = Math.floor(currentHour.getTime() / 1000)
-  const latestAt = sorted.at(-1)?.at
-  const endAt = visibleHours <= 24 ? Math.min(currentHourAt, todayStart + 23 * 3600) : (latestAt ?? currentHourAt)
-  const startAt = visibleHours <= 24 ? todayStart : endAt - (visibleHours - 1) * 3600
-  const points = new Map(sorted.map((point) => [point.at, point.quotaRemainingPercent]))
-  let previous = [...sorted].reverse().find((point) => point.at < startAt && point.quotaRemainingPercent !== undefined)?.quotaRemainingPercent
-  const slots = Array.from({ length: visibleHours <= 24 ? Math.max(1, Math.floor((endAt - startAt) / 3600) + 1) : visibleHours }, (_, index) => {
-    const at = visibleHours <= 24 ? startAt + index * 3600 : startAt + index * 3600
-    const actual = points.get(at)
-    if (actual !== undefined) previous = actual
-    return { at, quotaRemainingPercent: actual ?? previous, carried: actual === undefined && previous !== undefined }
-  })
-  const values = slots.map((point) => point.quotaRemainingPercent ?? 0)
-  const max = Math.max(1, ...values)
-  const first = slots.find((point) => point?.quotaRemainingPercent !== undefined)?.quotaRemainingPercent
-  const last = [...slots].reverse().find((point) => point?.quotaRemainingPercent !== undefined)?.quotaRemainingPercent
-  const hasValue = slots.some((point) => point.quotaRemainingPercent !== undefined)
-  const hasActualValue = slots.some((point) => point.quotaRemainingPercent !== undefined && !point.carried)
-  const bars = hasValue ? slots.map((point, index) => {
+  const sorted = [...snapshot.history]
+    .filter((point) => point.quotaRemainingPercent !== undefined)
+    .sort((left, right) => left.at - right.at)
+  const points = new Map<string, { at: number; quota: number }>()
+  for (const point of sorted) {
     const date = new Date(point.at * 1000)
-    const label = `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:00`
-    const carryLabel = point.carried ? ' · 沿用上次采样' : ''
-    return `<i class="history-slot has-value${point.carried ? ' carried' : ''}" style="height:${Math.max(8, (values[index] / max) * 100)}%" title="${label} · ${point.quotaRemainingPercent}%${carryLabel}"></i>`
-  }).join('') : Array.from({ length: visibleHours <= 24 ? 24 : visibleHours }, (_, index) => `<i class="history-slot" style="height:4%" title="${index}:00 · 暂无数据"></i>`).join('')
-  const summaryLabel = hasActualValue ? (visibleHours <= 24 ? '今日已采样' : '已保存最近 7 天') : hasValue ? '沿用上次采样' : '暂无成功采样'
-  root.innerHTML = `<div class="history-summary"><span>周额度 ${first ?? '--'}% → ${last ?? '--'}%</span><span>${summaryLabel}</span></div><div class="history-scroll"><div class="history-track" aria-label="${historyWindowLabel(visibleHours)}每小时周额度趋势">${bars}</div></div>`
+    const key = historyHourKey(date)
+    const previous = points.get(key)
+    if (!previous || point.at >= previous.at) points.set(key, { at: point.at, quota: point.quotaRemainingPercent! })
+  }
+  const cells: string[] = []
+  const values: number[] = []
+  for (let dayOffset = HISTORY_DAYS - 1; dayOffset >= 0; dayOffset -= 1) {
+    const day = new Date(today)
+    day.setDate(today.getDate() - dayOffset)
+    for (let hour = 0; hour < HOURS_PER_DAY; hour += 1) {
+      const cellDate = new Date(day)
+      cellDate.setHours(hour, 0, 0, 0)
+      const label = `${cellDate.getMonth() + 1}/${cellDate.getDate()} ${String(hour).padStart(2, '0')}:00`
+      const point = points.get(historyHourKey(cellDate))
+      if (point) {
+        values.push(point.quota)
+        const opacity = Math.max(0.28, Math.min(1, point.quota / 100))
+        cells.push(`<i class="history-slot has-value" style="--slot-opacity:${opacity}" title="${label} · ${point.quota}%" aria-label="${label} · 周额度 ${point.quota}%"></i>`)
+      } else {
+        cells.push(`<i class="history-slot" title="${label} · 暂无采样" aria-label="${label} · 暂无采样"></i>`)
+      }
+    }
+  }
+  const first = sorted[0]?.quotaRemainingPercent
+  const last = sorted.at(-1)?.quotaRemainingPercent
+  const summaryLabel = values.length ? '已保存最近 7 天' : '暂无成功采样'
+  root.innerHTML = `<div class="history-summary"><span>周额度 ${first ?? '--'}% → ${last ?? '--'}%</span><span>${summaryLabel}</span></div><div class="history-grid" role="grid" aria-label="最近 7 天每小时周额度趋势">${cells.join('')}</div>`
 }
 
 function renderTaskCounts(root: HTMLElement, snapshot: Snapshot) {
@@ -121,46 +130,10 @@ export function mountDetailsPanel(
   let lastTaskSignature = ''
   let currentPairingOpen = pairingSettingsOpen
   let currentPairingInfo = pairingInfo
-  let visibleHistoryHours = 24
   let historySnapshot: Snapshot | undefined
-  let dragScroll: HTMLElement | undefined
-  let dragStartX = 0
-  let dragStartLeft = 0
 
   pairingButton.addEventListener('click', () => onTogglePairing?.())
   refreshButton.addEventListener('click', onRefresh)
-  historyCard.addEventListener('wheel', (event) => {
-    const direction = event.deltaY < 0 ? 1 : -1
-    const next = Math.max(24, Math.min(168, visibleHistoryHours + direction * 24))
-    if (next === visibleHistoryHours) return
-    event.preventDefault()
-    visibleHistoryHours = next
-    if (historySnapshot) {
-      historyWindow.textContent = historyWindowLabel(visibleHistoryHours)
-      renderHistory(historyContent, historySnapshot, visibleHistoryHours)
-    }
-  }, { passive: false })
-  historyCard.addEventListener('pointerdown', (event) => {
-    const scroll = (event.target as HTMLElement).closest<HTMLElement>('.history-scroll')
-    if (!scroll || event.button !== 0) return
-    dragScroll = scroll
-    dragStartX = event.clientX
-    dragStartLeft = scroll.scrollLeft
-    scroll.classList.add('is-dragging')
-    scroll.setPointerCapture?.(event.pointerId)
-  })
-  historyCard.addEventListener('pointermove', (event) => {
-    if (!dragScroll) return
-    dragScroll.scrollLeft = dragStartLeft - (event.clientX - dragStartX)
-  })
-  const stopHistoryDrag = (event: PointerEvent) => {
-    if (!dragScroll) return
-    dragScroll.classList.remove('is-dragging')
-    dragScroll.releasePointerCapture?.(event.pointerId)
-    dragScroll = undefined
-  }
-  historyCard.addEventListener('pointerup', stopHistoryDrag)
-  historyCard.addEventListener('pointercancel', stopHistoryDrag)
   if (onAdvance) panel.addEventListener('dblclick', (event) => {
     if ((event.target as HTMLElement).closest('button')) return
     onAdvance()
@@ -207,8 +180,8 @@ export function mountDetailsPanel(
       }
       renderTaskCounts(taskCount, snapshot)
       historySnapshot = snapshot
-      historyWindow.textContent = historyWindowLabel(visibleHistoryHours)
-      renderHistory(historyContent, snapshot, visibleHistoryHours)
+      historyWindow.textContent = '最近 7 天'
+      renderHistory(historyContent, snapshot)
     },
     setRefreshing(value) {
       refreshButton.disabled = value
