@@ -18,7 +18,12 @@
     @media(max-width:560px){body{padding:max(24px,env(safe-area-inset-top)) 8px max(24px,env(safe-area-inset-bottom))}.shell{padding-top:0}.seg{padding:8px 6px;gap:6px}.seg strong{font-size:12px}.ring{width:48px;height:48px;flex-basis:48px}.ring b{font-size:12px}.details{padding:16px}.pairing{margin-top:12vh}.pairing form{display:block}.pairing input,.pair-submit{width:100%}.pair-submit{margin-top:8px}}
     .pull-refresh[aria-hidden="true"]{visibility:hidden}.pull-refresh.is-ready{color:#5b6c55;font-weight:700}.pull-refresh.is-refreshing{height:34px;opacity:1;color:#66745f}.pull-refresh.is-confirmed{height:34px;opacity:1;color:#6f8966;font-weight:700;animation:pull-confirmed-hide 1.4s ease forwards}@keyframes pull-confirmed-hide{0%,85%{opacity:1;visibility:visible}100%{height:0;opacity:0;visibility:hidden}}
   </style>
-</head>
+  <style>
+    .history-grid{display:grid!important;grid-template-columns:repeat(168,minmax(0,1fr));grid-template-rows:34px;align-items:end;gap:1px;width:100%;padding:4px 0}
+    .history-slot{display:block;align-self:end;width:100%;height:1px;min-width:0;border-radius:1px 1px 0 0;background:rgba(189,207,174,.28)}
+    .history-slot.has-value{height:max(1px,var(--slot-height,1px));background:#bdcfae;opacity:1;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+  </style>
+  </head>
 <body>
   <main class="shell"><div id="pull-refresh" class="pull-refresh" aria-live="polite" aria-hidden="true">下滑刷新</div>
     <noscript><section class="pairing"><h1>Codex 额度</h1><p>此页面需要开启 JavaScript 才能读取局域网快照。</p></section></noscript>
@@ -58,6 +63,8 @@
       for(let dayOffset=6;dayOffset>=0;dayOffset--){const day=new Date(today);day.setDate(today.getDate()-dayOffset);for(let hour=0;hour<24;hour++){const cellDate=new Date(day);cellDate.setHours(hour,0,0,0);const label=`${cellDate.getMonth()+1}/${cellDate.getDate()} ${String(hour).padStart(2,'0')}:00`,point=pointsByHour.get(hourKey(cellDate));if(point){values.push(Number(point.quota));const opacity=Math.max(.28,Math.min(1,Number(point.quota)/100));cells.push(`<i class="history-slot has-value" style="--slot-opacity:${opacity}" title="${label} · ${point.quota}%" aria-label="${label} · 周额度 ${point.quota}%"></i>`)}else cells.push(`<i class="history-slot" title="${label} · 暂无采样" aria-label="${label} · 暂无采样"></i>`)}}
       const first=sorted[0]?.quota,last=sorted.at(-1)?.quota,summaryLabel=values.length?'已保存最近 7 天':'暂无成功采样';document.querySelector('.history-window').textContent='最近 7 天';document.querySelector('.history-content').innerHTML=`<div class="history-summary"><span>周额度 ${first??'--'}% → ${last??'--'}%</span><span>${summaryLabel}</span></div><div class="history-grid" role="grid" aria-label="最近 7 天每小时周额度趋势">${cells.join('')}</div>`;
     }
+    const renderHistoryWithBars=renderHistory;
+    renderHistory=points=>{renderHistoryWithBars(points);document.querySelectorAll('.history-slot.has-value').forEach(slot=>{const match=slot.title.match(/(\d+(?:\.\d+)?)%/),quota=match?Number(match[1]):0;if(Number.isFinite(quota))slot.style.setProperty('--slot-height',`${Math.max(0,Math.min(100,quota))}%`)})};
     function showPairing(message=''){dashboard.hidden=true;pairing.hidden=false;document.querySelector('#pair-error').textContent=message}
     function showDashboard(){pairing.hidden=true;dashboard.hidden=false}
     function extractCode(raw){const value=raw.trim();try{const url=new URL(value,location.href);return url.searchParams.get('pair')||value}catch{return value}}

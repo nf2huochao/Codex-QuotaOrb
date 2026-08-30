@@ -55,8 +55,7 @@ function renderHistory(root: HTMLElement, snapshot: Snapshot) {
       const point = points.get(historyHourKey(cellDate))
       if (point) {
         values.push(point.quota)
-        const opacity = Math.max(0.28, Math.min(1, point.quota / 100))
-        cells.push(`<i class="history-slot has-value" style="--slot-opacity:${opacity}" title="${label} · ${point.quota}%" aria-label="${label} · 周额度 ${point.quota}%"></i>`)
+        cells.push(`<i class="history-slot has-value" style="--slot-height:${Math.max(0, Math.min(100, point.quota))}%" title="${label} · ${point.quota}%" aria-label="${label} · 周额度 ${point.quota}%"></i>`)
       } else {
         cells.push(`<i class="history-slot" title="${label} · 暂无采样" aria-label="${label} · 暂无采样"></i>`)
       }
