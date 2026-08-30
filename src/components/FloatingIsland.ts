@@ -134,8 +134,10 @@ export function mountFloatingIsland(root: HTMLElement, onOpen: () => void): Moun
       const percent = quotaPercent(snapshot)
       percentLabel.textContent = percent === undefined ? '--' : `${percent}%`
       button.classList.toggle('island-stale', snapshot.status !== 'fresh')
-      quotaLabel.textContent = isPlusPlan(snapshot) ? '5小时额度剩余' : '本周剩余'
-      quotaCopy.textContent = snapshot.status !== 'fresh' ? '数据待确认' : isPlusPlan(snapshot) ? '5小时额度可用' : '额度可用'
+      const plus = isPlusPlan(snapshot)
+      const weeklyPercent = snapshot.quotaRemainingPercent
+      quotaLabel.textContent = plus ? `周额度剩余 ${weeklyPercent === undefined ? '--' : `${weeklyPercent}%`}` : '本周剩余'
+      quotaCopy.textContent = snapshot.status !== 'fresh' ? '数据待确认' : plus ? '5小时额度可用' : '额度可用'
       const summary = islandSummary(snapshot)
       taskDot.style.setProperty('--status-color', STATUS_COLOR[summary.status])
       taskCopy.textContent = summary.taskCount ? '任务状态' : statusLabel.none
