@@ -20,7 +20,9 @@ function formatTokens(tokens?: number) {
 }
 
 function tokenLabel(snapshot: Snapshot) {
-  return snapshot.usageDate ? `Token · ${snapshot.usageDate.slice(5)}` : '本日 Token'
+  const now = new Date()
+  const date = snapshot.usageDate?.slice(5) ?? `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  return `Token · ${date}`
 }
 
 function isPlusPlan(snapshot: Snapshot) {

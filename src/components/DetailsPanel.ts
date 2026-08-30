@@ -5,6 +5,7 @@ import { MountedView } from './FloatingIsland'
 function formatRecentTime(epoch?: number) { return epoch ? new Date(epoch * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--' }
 function formatResetTime(epoch?: number) { return epoch ? new Date(epoch * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '--' }
 function formatResetDate(epoch?: number) { return epoch ? new Date(epoch * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric' }) : '--' }
+function tokenLabel(snapshot: Snapshot) { const now = new Date(); const date = snapshot.usageDate?.slice(5) ?? `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`; return `Token · ${date}` }
 function value(value: unknown) { return value === undefined || value === null ? '--' : String(value) }
 function isPlusPlan(snapshot: Snapshot) { return snapshot.plan?.trim().toLowerCase() === 'plus' }
 function quotaPercent(snapshot: Snapshot) { return isPlusPlan(snapshot) ? snapshot.fiveHourRemainingPercent : snapshot.quotaRemainingPercent }
@@ -166,7 +167,7 @@ export function mountDetailsPanel(
       weeklyQuotaNote.textContent = plus ? `本周剩余 ${value(snapshot.quotaRemainingPercent)}${snapshot.quotaRemainingPercent === undefined ? '' : '%'}，重置时间为 ${formatResetDate(snapshot.quotaResetsAt)}` : ''
       planValue.textContent = value(snapshot.plan)
       creditsValue.textContent = value(snapshot.resetCredits)
-      tokenDetailLabel.textContent = snapshot.usageDate ? `Token · ${snapshot.usageDate.slice(5)}` : '本日 Token'
+      tokenDetailLabel.textContent = tokenLabel(snapshot)
       tokensValue.textContent = formatTokens(snapshot.todayTokens)
       freshness.className = `freshness ${snapshot.status}`
       const source = sourceLabel(snapshot.source)
