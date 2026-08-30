@@ -24,19 +24,38 @@ function formatTokens(tokens?: number) {
 function historyWindowLabel(hours: number) { return hours <= 24 ? '当天采样' : `最近 ${Math.ceil(hours / 24)} 天` }
 function renderHistory(root: HTMLElement, snapshot: Snapshot, visibleHours = 24) {
   const sorted = [...snapshot.history].sort((left, right) => left.at - right.at)
-  const today = new Date()
+  const now = new Date()
+  const today = new Date(now)
   today.setHours(0, 0, 0, 0)
-  const slots = visibleHours <= 24 ? sorted.filter((point) => point.at >= Math.floor(today.getTime() / 1000)) : sorted.slice(-visibleHours)
-  const values = slots.map((point) => point?.quotaRemainingPercent ?? 0)
+  const todayStart = Math.floor(today.getTime() / 1000)
+  const currentHour = new Date(now)
+  currentHour.setMinutes(0, 0, 0)
+  const currentHourAt = Math.floor(currentHour.getTime() / 1000)
+  const latestAt = sorted.at(-1)?.at
+  const endAt = visibleHours <= 24 ? Math.min(currentHourAt, todayStart + 23 * 3600) : (latestAt ?? currentHourAt)
+  const startAt = visibleHours <= 24 ? todayStart : endAt - (visibleHours - 1) * 3600
+  const points = new Map(sorted.map((point) => [point.at, point.quotaRemainingPercent]))
+  let previous = [...sorted].reverse().find((point) => point.at < startAt && point.quotaRemainingPercent !== undefined)?.quotaRemainingPercent
+  const slots = Array.from({ length: visibleHours <= 24 ? Math.max(1, Math.floor((endAt - startAt) / 3600) + 1) : visibleHours }, (_, index) => {
+    const at = visibleHours <= 24 ? startAt + index * 3600 : startAt + index * 3600
+    const actual = points.get(at)
+    if (actual !== undefined) previous = actual
+    return { at, quotaRemainingPercent: actual ?? previous, carried: actual === undefined && previous !== undefined }
+  })
+  const values = slots.map((point) => point.quotaRemainingPercent ?? 0)
   const max = Math.max(1, ...values)
   const first = slots.find((point) => point?.quotaRemainingPercent !== undefined)?.quotaRemainingPercent
   const last = [...slots].reverse().find((point) => point?.quotaRemainingPercent !== undefined)?.quotaRemainingPercent
-  const bars = slots.length ? slots.map((point, index) => {
+  const hasValue = slots.some((point) => point.quotaRemainingPercent !== undefined)
+  const hasActualValue = slots.some((point) => point.quotaRemainingPercent !== undefined && !point.carried)
+  const bars = hasValue ? slots.map((point, index) => {
     const date = new Date(point.at * 1000)
     const label = `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:00`
-    return `<i class="history-slot has-value" style="height:${Math.max(8, (values[index] / max) * 100)}%" title="${label} · ${point.quotaRemainingPercent ?? '--'}%"></i>`
-  }).join('') : Array.from({ length: 24 }, (_, index) => `<i class="history-slot" style="height:4%" title="${index}:00 · 暂无数据"></i>`).join('')
-  root.innerHTML = `<div class="history-summary"><span>周额度 ${first ?? '--'}% → ${last ?? '--'}%</span><span>${snapshot.history.length ? visibleHours <= 24 ? '今日已采样' : '已保存最近 7 天' : '暂无成功采样'}</span></div><div class="history-scroll"><div class="history-track" aria-label="${historyWindowLabel(visibleHours)}每小时周额度趋势">${bars}</div></div>`
+    const carryLabel = point.carried ? ' · 沿用上次采样' : ''
+    return `<i class="history-slot has-value${point.carried ? ' carried' : ''}" style="height:${Math.max(8, (values[index] / max) * 100)}%" title="${label} · ${point.quotaRemainingPercent}%${carryLabel}"></i>`
+  }).join('') : Array.from({ length: visibleHours <= 24 ? 24 : visibleHours }, (_, index) => `<i class="history-slot" style="height:4%" title="${index}:00 · 暂无数据"></i>`).join('')
+  const summaryLabel = hasActualValue ? (visibleHours <= 24 ? '今日已采样' : '已保存最近 7 天') : hasValue ? '沿用上次采样' : '暂无成功采样'
+  root.innerHTML = `<div class="history-summary"><span>周额度 ${first ?? '--'}% → ${last ?? '--'}%</span><span>${summaryLabel}</span></div><div class="history-scroll"><div class="history-track" aria-label="${historyWindowLabel(visibleHours)}每小时周额度趋势">${bars}</div></div>`
 }
 
 function renderTaskCounts(root: HTMLElement, snapshot: Snapshot) {

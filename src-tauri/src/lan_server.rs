@@ -778,7 +778,7 @@ mod tests {
             error: Some("等待".into()),
             history: vec![],
             hook_diagnostics: crate::domain::HookDiagnostics::default(),
-            schema_version: "1.0".into(),
+            schema_version: crate::domain::SNAPSHOT_SCHEMA_VERSION.into(),
         })
         .0
     }

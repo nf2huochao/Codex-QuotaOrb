@@ -57,6 +57,10 @@ pub struct SnapshotStore {
 
 impl SnapshotStore {
     pub fn new(mut initial: Snapshot) -> (Self, watch::Receiver<Snapshot>) {
+        if initial.schema_version == "1.0" {
+            initial.history.clear();
+        }
+        initial.schema_version = crate::domain::SNAPSHOT_SCHEMA_VERSION.into();
         initial.task_counts = crate::domain::TaskCounts::from_tasks(&initial.tasks);
         initial.active_task_count = initial.task_counts.needs_action + initial.task_counts.running;
         if initial.status == crate::domain::DataStatus::Fresh {
@@ -90,6 +94,10 @@ impl SnapshotStore {
     fn normalize(&self, mut snapshot: Snapshot) -> Snapshot {
         let previous_snapshot = self.state.lock().expect("snapshot lock").clone();
         let previous_history = previous_snapshot.history.clone();
+        if snapshot.schema_version == "1.0" {
+            snapshot.history.clear();
+        }
+        snapshot.schema_version = crate::domain::SNAPSHOT_SCHEMA_VERSION.into();
         if matches!(
             snapshot.source.as_deref(),
             Some(
@@ -274,7 +282,7 @@ pub fn empty_snapshot() -> Snapshot {
         error: Some("等待首次连接".into()),
         history: Vec::new(),
         hook_diagnostics: crate::domain::HookDiagnostics::default(),
-        schema_version: "1.0".into(),
+        schema_version: crate::domain::SNAPSHOT_SCHEMA_VERSION.into(),
     }
 }
 
@@ -315,7 +323,7 @@ mod tests {
             error: None,
             history: Vec::new(),
             hook_diagnostics: crate::domain::HookDiagnostics::default(),
-            schema_version: "1.0".into(),
+            schema_version: crate::domain::SNAPSHOT_SCHEMA_VERSION.into(),
         }
     }
     #[test]
@@ -326,6 +334,24 @@ mod tests {
         next.status = DataStatus::Stale;
         store.publish(next);
         assert!(store.current().tasks[0].acknowledged);
+    }
+
+    #[test]
+    fn clears_legacy_history_when_upgrading_to_weekly_history() {
+        let mut initial = snapshot();
+        initial.schema_version = "1.0".into();
+        initial.status = DataStatus::Stale;
+        initial.quota_remaining_percent = None;
+        initial.history = vec![UsagePoint {
+            at: 1,
+            quota_remaining_percent: Some(5),
+        }];
+        let (store, _) = SnapshotStore::new(initial);
+        assert!(store.current().history.is_empty());
+        assert_eq!(
+            store.current().schema_version,
+            crate::domain::SNAPSHOT_SCHEMA_VERSION
+        );
     }
     #[test]
     fn unknown_ack_is_false() {

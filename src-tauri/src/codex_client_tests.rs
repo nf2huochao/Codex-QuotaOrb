@@ -36,6 +36,41 @@ mod tests {
         assert_eq!(response.five_hour_remaining_percent, None);
         assert_eq!(response.five_hour_resets_at, None);
     }
+
+    #[test]
+    fn identifies_windows_by_duration_when_primary_is_five_hour() {
+        let response = parse_rate_limits(
+            r#"{
+                "rateLimits": {
+                    "primary": {"usedPercent": 38, "windowDurationMins": 300, "resetsAt": 1765382400},
+                    "secondary": {"usedPercent": 17, "windowDurationMins": 10080, "resetsAt": 1765401600},
+                    "planType": "Plus"
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(response.remaining_percent, Some(83));
+        assert_eq!(response.resets_at, Some(1765401600));
+        assert_eq!(response.five_hour_remaining_percent, Some(62));
+        assert_eq!(response.five_hour_resets_at, Some(1765382400));
+    }
+
+    #[test]
+    fn identifies_weekly_primary_when_only_the_seven_day_window_is_returned() {
+        let response = parse_rate_limits(
+            r#"{
+                "rateLimits": {
+                    "primary": {"usedPercent": 31, "windowDurationMins": 10080, "resetsAt": 1765401600},
+                    "secondary": null,
+                    "planType": "Plus"
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(response.remaining_percent, Some(69));
+        assert_eq!(response.resets_at, Some(1765401600));
+        assert_eq!(response.five_hour_remaining_percent, None);
+    }
     #[test]
     fn parses_usage_tokens() {
         let usage = parse_usage(include_str!("../fixtures/usage.json")).unwrap();

@@ -56,7 +56,7 @@ pub async fn poll_once(
                 error: None,
                 history: previous.history.clone(),
                 hook_diagnostics: previous.hook_diagnostics.clone(),
-                schema_version: "1.0".into(),
+                schema_version: crate::domain::SNAPSHOT_SCHEMA_VERSION.into(),
             };
             store.publish_if_changed(snapshot.clone());
             snapshot

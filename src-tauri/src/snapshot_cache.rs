@@ -4,7 +4,7 @@ use std::path::Path;
 pub fn load(path: &Path) -> Option<Snapshot> {
     let bytes = std::fs::read(path).ok()?;
     let mut snapshot: Snapshot = serde_json::from_slice(&bytes).ok()?;
-    if snapshot.schema_version != "1.0" || snapshot.fetched_at.is_none() {
+    if !matches!(snapshot.schema_version.as_str(), "1.0" | "1.1") || snapshot.fetched_at.is_none() {
         return None;
     }
     snapshot.status = DataStatus::Stale;

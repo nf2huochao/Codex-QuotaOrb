@@ -130,6 +130,8 @@ pub struct Snapshot {
     pub schema_version: String,
 }
 
+pub const SNAPSHOT_SCHEMA_VERSION: &str = "1.1";
+
 pub fn map_task_status(event: &TaskEvent) -> TaskStatus {
     if event.waiting_for_user {
         TaskStatus::NeedsAction

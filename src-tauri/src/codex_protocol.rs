@@ -70,63 +70,95 @@ fn as_u64(value: Option<&Value>) -> Option<u64> {
         .or_else(|| value.and_then(Value::as_i64).map(|v| v.max(0) as u64))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ParsedRateLimitWindow {
+    remaining_percent: Option<u8>,
+    resets_at: Option<i64>,
+    duration_mins: Option<i64>,
+}
+
+fn parse_rate_limit_window(value: Option<&Value>) -> Option<ParsedRateLimitWindow> {
+    let window = value?;
+    let remaining_percent = as_u64(
+        window
+            .get("remaining_percent")
+            .or_else(|| window.get("remainingPercent")),
+    )
+    .or_else(|| as_u64(window.get("usedPercent")).map(|used| 100u64.saturating_sub(used)))
+    .or_else(|| {
+        as_u64(window.get("limit"))
+            .zip(as_u64(window.get("used")))
+            .map(|(limit, used)| limit.saturating_sub(used) * 100 / limit.max(1))
+    })
+    .map(|value| value.min(100) as u8);
+    let resets_at = as_i64(
+        window
+            .get("resets_at")
+            .or_else(|| window.get("reset_at"))
+            .or_else(|| window.get("resetsAt")),
+    );
+    let duration_mins = as_i64(
+        window
+            .get("windowDurationMins")
+            .or_else(|| window.get("window_duration_mins"))
+            .or_else(|| window.get("windowMinutes")),
+    );
+    Some(ParsedRateLimitWindow {
+        remaining_percent,
+        resets_at,
+        duration_mins,
+    })
+}
+
+fn window_with_duration(
+    primary: Option<ParsedRateLimitWindow>,
+    secondary: Option<ParsedRateLimitWindow>,
+    duration_mins: i64,
+) -> Option<ParsedRateLimitWindow> {
+    primary
+        .filter(|window| window.duration_mins == Some(duration_mins))
+        .or_else(|| secondary.filter(|window| window.duration_mins == Some(duration_mins)))
+}
+
 pub fn parse_rate_limits(input: &str) -> Result<RateLimitResponse, ProtocolError> {
     let root = payload(serde_json::from_str(input)?);
     let snapshot = root
         .get("rateLimits")
         .or_else(|| root.get("rate_limits"))
         .unwrap_or(&root);
-    let primary = snapshot
+    let primary_value = snapshot
         .get("primary")
         .or_else(|| snapshot.get("individualLimit"))
         .or_else(|| root.get("primary"))
         .or_else(|| root.get("rate_limit"))
         .unwrap_or(snapshot);
-    let remaining_percent = as_u64(
-        primary
-            .get("remaining_percent")
-            .or_else(|| primary.get("remainingPercent")),
-    )
-    .or_else(|| as_u64(primary.get("usedPercent")).map(|used| 100u64.saturating_sub(used)))
-    .or_else(|| {
-        as_u64(primary.get("limit"))
-            .zip(as_u64(primary.get("used")))
-            .map(|(limit, used)| limit.saturating_sub(used) * 100 / limit.max(1))
-    })
-    .map(|v| v.min(100) as u8);
-    let resets_at = as_i64(
-        primary
-            .get("resets_at")
-            .or_else(|| primary.get("reset_at"))
-            .or_else(|| primary.get("resetsAt")),
-    );
-    let secondary = snapshot
+    let secondary_value = snapshot
         .get("secondary")
         .or_else(|| snapshot.get("secondaryLimit"))
         .or_else(|| snapshot.get("fiveHour"))
         .or_else(|| snapshot.get("five_hour"));
-    let five_hour_remaining_percent = secondary.and_then(|limit| {
-        as_u64(
-            limit
-                .get("remaining_percent")
-                .or_else(|| limit.get("remainingPercent")),
-        )
-        .or_else(|| as_u64(limit.get("usedPercent")).map(|used| 100u64.saturating_sub(used)))
-        .or_else(|| {
-            as_u64(limit.get("limit"))
-                .zip(as_u64(limit.get("used")))
-                .map(|(limit, used)| limit.saturating_sub(used) * 100 / limit.max(1))
-        })
-        .map(|v| v.min(100) as u8)
+    let primary = parse_rate_limit_window(Some(primary_value));
+    let secondary = parse_rate_limit_window(secondary_value);
+    let named_five_hour = parse_rate_limit_window(
+        snapshot
+            .get("fiveHour")
+            .or_else(|| snapshot.get("five_hour")),
+    );
+    let weekly = window_with_duration(primary, secondary, 10_080).or_else(|| {
+        if primary.is_some_and(|window| window.duration_mins == Some(300)) {
+            secondary.filter(|window| window.duration_mins != Some(300))
+        } else {
+            primary
+        }
     });
-    let five_hour_resets_at = secondary.and_then(|limit| {
-        as_i64(
-            limit
-                .get("resets_at")
-                .or_else(|| limit.get("reset_at"))
-                .or_else(|| limit.get("resetsAt")),
-        )
-    });
+    let five_hour = window_with_duration(primary, secondary, 300)
+        .or(named_five_hour)
+        .or_else(|| secondary.filter(|window| window.duration_mins.is_none()))
+        .filter(|window| weekly != Some(*window) || window.duration_mins == Some(300));
+    let remaining_percent = weekly.and_then(|window| window.remaining_percent);
+    let resets_at = weekly.and_then(|window| window.resets_at);
+    let five_hour_remaining_percent = five_hour.and_then(|window| window.remaining_percent);
+    let five_hour_resets_at = five_hour.and_then(|window| window.resets_at);
     let credits = root
         .get("rateLimitResetCredits")
         .or_else(|| root.get("credits"))
