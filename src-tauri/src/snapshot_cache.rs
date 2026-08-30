@@ -64,4 +64,41 @@ mod tests {
         assert_eq!(load(&path).unwrap().today_tokens, Some(10));
         let _ = std::fs::remove_file(path);
     }
+
+    #[test]
+    fn cache_round_trips_plus_five_hour_fields() {
+        let path =
+            std::env::temp_dir().join(format!("codex-quota-cache-{}.json", uuid::Uuid::new_v4()));
+        let mut snapshot = empty_snapshot();
+        snapshot.status = DataStatus::Fresh;
+        snapshot.fetched_at = Some(100);
+        snapshot.five_hour_remaining_percent = Some(62);
+        snapshot.five_hour_resets_at = Some(200);
+        save(&path, &snapshot).unwrap();
+        let cached = load(&path).unwrap();
+        assert_eq!(cached.five_hour_remaining_percent, Some(62));
+        assert_eq!(cached.five_hour_resets_at, Some(200));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn cache_load_accepts_snapshot_without_new_optional_fields() {
+        let path =
+            std::env::temp_dir().join(format!("codex-quota-cache-{}.json", uuid::Uuid::new_v4()));
+        let mut snapshot = empty_snapshot();
+        snapshot.status = DataStatus::Fresh;
+        snapshot.fetched_at = Some(100);
+        let mut json = serde_json::to_value(&snapshot).unwrap();
+        json.as_object_mut()
+            .expect("snapshot object")
+            .remove("five_hour_remaining_percent");
+        json.as_object_mut()
+            .expect("snapshot object")
+            .remove("five_hour_resets_at");
+        std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+        let cached = load(&path).unwrap();
+        assert_eq!(cached.five_hour_remaining_percent, None);
+        assert_eq!(cached.five_hour_resets_at, None);
+        let _ = std::fs::remove_file(path);
+    }
 }
