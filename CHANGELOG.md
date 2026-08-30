@@ -4,6 +4,25 @@ All notable changes to Codex QuotaOrb are documented here in Chinese and English
 
 Codex 额度悬浮窗的主要新增、改进和修复均在此以中英文记录。
 
+## v0.1.8 — 2026-08-31
+
+### Added / 新增
+
+- Added separate Plus five-hour quota and weekly quota labels, reset times, and remaining percentages. / 为 Plus 套餐增加 5 小时额度与周额度的独立显示、重置时间和剩余百分比。
+- Added a fixed seven-day by twenty-four-hour quota view with 168 hourly slots. / 增加固定的最近 7 天 × 24 小时额度视图，共 168 个小时位置。
+
+### Improved / 改进
+
+- Replaced the scrollable trend strip with one compact row of slim bars whose heights show the sampled weekly quota. / 将可滚动趋势条改为一行细柱，柱高直接表示已采样的周额度变化。
+- Kept all 168 slots visible on desktop and LAN mobile web views; unsampled hours remain empty instead of carrying old values. / 桌面端和局域网手机网页端始终显示完整 168 个位置，未采样小时保持空白，不沿用旧值。
+- Removed the native scrollbar and wheel-based window switching from the quota trend area. / 去除额度趋势区域的原生滑轨和滚轮切换窗口。
+- Restored dated Token labels and preserved the shared task snapshot across the floating island, details page, and LAN web view. / 恢复带日期的 Token 标签，并保持悬浮球、详情页和局域网网页使用同一任务快照。
+
+### Release notes / 发行说明
+
+- Windows installer: `Codex 额度悬浮窗_0.1.8_x64-setup.exe`. / Windows 安装包：`Codex 额度悬浮窗_0.1.8_x64-setup.exe`。
+- This release is a Windows x64 test build. Signed updater artifacts require the repository signing secrets described in `docs/release-signing.md`. / 本版本为 Windows x64 测试版；签名更新文件需要按 `docs/release-signing.md` 配置仓库签名 Secrets。
+
 ## v0.1.7 — 2026-08-24
 
 ### Added / 新增

@@ -49,10 +49,11 @@ jobs:
           releaseBody: |
             ## 本次更新 / Release notes
 
-            - 重写中英文 README，补充桌面三态界面与手机局域网网页预览。
-            - 统一任务状态快照，修复长条与详情页统计不一致。
-            - 增加 Hook 诊断、断线提示和 Windows 本地状态监听。
-            - Signed Windows installer and updater manifest are included.
+            - Plus 套餐现在分别显示 5 小时额度、周额度和对应重置时间。
+            - 近期趋势改为固定最近 7 天 × 24 小时的一行细柱，共 168 个位置；桌面端和手机网页端均完整显示。
+            - 去除滚轮切换和原生滑轨，未采样小时保持空白，不沿用旧值。
+            - 保持悬浮球、详情页和手机局域网网页的任务快照、Token 日期和状态统计一致。
+            - Signed Windows installer and updater manifest are included when repository signing secrets are configured.
 
             详细说明见仓库中的 CHANGELOG.md。
           releaseDraft: false
