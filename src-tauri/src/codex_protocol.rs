@@ -106,14 +106,18 @@ pub fn parse_rate_limits(input: &str) -> Result<RateLimitResponse, ProtocolError
         .or_else(|| snapshot.get("fiveHour"))
         .or_else(|| snapshot.get("five_hour"));
     let five_hour_remaining_percent = secondary.and_then(|limit| {
-        as_u64(limit.get("remaining_percent").or_else(|| limit.get("remainingPercent")))
-            .or_else(|| as_u64(limit.get("usedPercent")).map(|used| 100u64.saturating_sub(used)))
-            .or_else(|| {
-                as_u64(limit.get("limit"))
-                    .zip(as_u64(limit.get("used")))
-                    .map(|(limit, used)| limit.saturating_sub(used) * 100 / limit.max(1))
-            })
-            .map(|v| v.min(100) as u8)
+        as_u64(
+            limit
+                .get("remaining_percent")
+                .or_else(|| limit.get("remainingPercent")),
+        )
+        .or_else(|| as_u64(limit.get("usedPercent")).map(|used| 100u64.saturating_sub(used)))
+        .or_else(|| {
+            as_u64(limit.get("limit"))
+                .zip(as_u64(limit.get("used")))
+                .map(|(limit, used)| limit.saturating_sub(used) * 100 / limit.max(1))
+        })
+        .map(|v| v.min(100) as u8)
     });
     let five_hour_resets_at = secondary.and_then(|limit| {
         as_i64(

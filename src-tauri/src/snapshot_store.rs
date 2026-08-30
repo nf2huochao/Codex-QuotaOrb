@@ -413,10 +413,22 @@ mod tests {
         }
         assert_eq!(history.len(), 168);
         assert!(history.windows(2).all(|points| points[0].at < points[1].at));
-        assert_eq!(history.last().map(|point| point.at), Some(local_hour_bucket(hour).unwrap().0));
-        assert_eq!(history.first().map(|point| point.at), Some(local_hour_bucket(hour - 167 * 3600).unwrap().0));
+        assert_eq!(
+            history.last().map(|point| point.at),
+            Some(local_hour_bucket(hour).unwrap().0)
+        );
+        assert_eq!(
+            history.first().map(|point| point.at),
+            Some(local_hour_bucket(hour - 167 * 3600).unwrap().0)
+        );
         let replaced = merge_hourly_history(&history, Some(hour - 10), Some(99));
         assert_eq!(replaced.len(), 168);
-        assert_eq!(replaced.iter().find(|point| point.at == local_hour_bucket(hour - 10).unwrap().0).and_then(|point| point.quota_remaining_percent), Some(99));
+        assert_eq!(
+            replaced
+                .iter()
+                .find(|point| point.at == local_hour_bucket(hour - 10).unwrap().0)
+                .and_then(|point| point.quota_remaining_percent),
+            Some(99)
+        );
     }
 }

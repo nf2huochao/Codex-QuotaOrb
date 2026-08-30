@@ -29,10 +29,9 @@ mod tests {
 
     #[test]
     fn keeps_five_hour_fields_empty_when_secondary_is_missing() {
-        let response = parse_rate_limits(
-            r#"{"rateLimits":{"primary":{"usedPercent":17},"planType":"Plus"}}"#,
-        )
-        .unwrap();
+        let response =
+            parse_rate_limits(r#"{"rateLimits":{"primary":{"usedPercent":17},"planType":"Plus"}}"#)
+                .unwrap();
         assert_eq!(response.remaining_percent, Some(83));
         assert_eq!(response.five_hour_remaining_percent, None);
         assert_eq!(response.five_hour_resets_at, None);

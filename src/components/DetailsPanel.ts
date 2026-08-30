@@ -4,7 +4,10 @@ import { MountedView } from './FloatingIsland'
 
 function formatRecentTime(epoch?: number) { return epoch ? new Date(epoch * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--' }
 function formatResetTime(epoch?: number) { return epoch ? new Date(epoch * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '--' }
+function formatResetDate(epoch?: number) { return epoch ? new Date(epoch * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric' }) : '--' }
 function value(value: unknown) { return value === undefined || value === null ? '--' : String(value) }
+function isPlusPlan(snapshot: Snapshot) { return snapshot.plan?.trim().toLowerCase() === 'plus' }
+function quotaPercent(snapshot: Snapshot) { return isPlusPlan(snapshot) ? snapshot.fiveHourRemainingPercent : snapshot.quotaRemainingPercent }
 function escapeHtml(value: string) { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!)) }
 function taskSignature(snapshot: Snapshot) { return snapshot.tasks.map((task) => `${task.id}:${task.status}:${task.acknowledged}:${task.title}:${task.activity ?? ''}:${task.waitingReason ?? ''}:${task.approvalRequestId ?? ''}:${task.updatedAt}:${task.tokenCount ?? ''}`).join('|') }
 function sourceLabel(source?: Snapshot['source']) { return source === 'app-server-event' ? '实时事件' : source === 'task-watch' ? '任务监听' : source === 'permission-hook' ? '批准监听' : source === 'metrics-poll' ? '指标轮询' : source === 'full-poll' ? '完整校准' : source === 'manual-refresh' ? '手动刷新' : source === 'local-cache' ? '本地缓存' : '' }
@@ -19,17 +22,17 @@ function formatTokens(tokens?: number) {
   return `${Number(value.toFixed(tokens >= 1_000_000 ? 0 : 1))}万`
 }
 function renderHistory(root: HTMLElement, snapshot: Snapshot) {
-  const start = new Date()
-  start.setHours(0, 0, 0, 0)
-  const slots = Array.from({ length: 24 }, (_, index) => {
-    const at = Math.floor((start.getTime() + index * 60 * 60 * 1000) / 1000)
-    return snapshot.history.find((point) => point.at === at)
-  })
+  const slots = [...snapshot.history].sort((left, right) => left.at - right.at).slice(-168)
   const values = slots.map((point) => point?.quotaRemainingPercent ?? 0)
   const max = Math.max(1, ...values)
   const first = slots.find((point) => point?.quotaRemainingPercent !== undefined)?.quotaRemainingPercent
   const last = [...slots].reverse().find((point) => point?.quotaRemainingPercent !== undefined)?.quotaRemainingPercent
-  root.innerHTML = `<div class="history-summary"><span>额度 ${first ?? '--'}% → ${last ?? '--'}%</span><span>${snapshot.history.length ? '今日已采样' : '暂无成功采样'}</span></div><div class="history-track" aria-label="当天 24 小时额度趋势">${slots.map((point, index) => `<i class="history-slot${point ? ' has-value' : ''}" style="height:${point ? Math.max(8, (values[index] / max) * 100) : 4}%" title="${point ? `${index}:00 · ${point.quotaRemainingPercent}%` : `${index}:00 · 暂无数据`}"></i>`).join('')}</div>`
+  const bars = slots.length ? slots.map((point, index) => {
+    const date = new Date(point.at * 1000)
+    const label = `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:00`
+    return `<i class="history-slot has-value" style="height:${Math.max(8, (values[index] / max) * 100)}%" title="${label} · ${point.quotaRemainingPercent ?? '--'}%"></i>`
+  }).join('') : Array.from({ length: 24 }, (_, index) => `<i class="history-slot" style="height:4%" title="${index}:00 · 暂无数据"></i>`).join('')
+  root.innerHTML = `<div class="history-summary"><span>额度 ${first ?? '--'}% → ${last ?? '--'}%</span><span>${snapshot.history.length ? '已保存最近 7 天' : '暂无成功采样'}</span></div><div class="history-scroll"><div class="history-track" aria-label="最近 7 天每小时额度趋势">${bars}</div></div>`
 }
 
 function renderTaskCounts(root: HTMLElement, snapshot: Snapshot) {
@@ -64,8 +67,8 @@ export function mountDetailsPanel(
   onApproval?: (taskId: string, decision: ApprovalDecision) => void,
 ): MountedDetailsView {
   root.innerHTML = `<section class="details-panel" aria-label="额度详情">
-    <header class="details-drag-region" data-tauri-drag-region><div data-tauri-drag-region><small data-tauri-drag-region>CODEX 额度状态</small><h1 class="details-title" data-tauri-drag-region></h1></div><button class="close-button pairing-settings-button" type="button" aria-label="配对设置"></button></header>
-    <div class="detail-grid"><div><small>下次重置</small><strong class="reset-value"></strong></div><div><small>当前套餐</small><strong class="plan-value"></strong></div><div><small>可用重置机会</small><strong class="credits-value"></strong></div><div><small class="token-detail-label"></small><strong class="tokens-value"></strong></div></div>
+    <header class="details-drag-region" data-tauri-drag-region><div data-tauri-drag-region><small data-tauri-drag-region>CODEX 额度状态</small><h1 class="details-title" data-tauri-drag-region></h1><small class="weekly-quota-note" data-tauri-drag-region></small></div><button class="close-button pairing-settings-button" type="button" aria-label="配对设置"></button></header>
+    <div class="detail-grid"><div><small class="reset-label">下次重置</small><strong class="reset-value"></strong></div><div><small>当前套餐</small><strong class="plan-value"></strong></div><div><small>可用重置机会</small><strong class="credits-value"></strong></div><div><small class="token-detail-label"></small><strong class="tokens-value"></strong></div></div>
     <div class="freshness"></div>
     <div class="history-card" aria-label="近期趋势"><div class="history-head"><strong>近期趋势</strong><small class="history-window"></small></div><div class="history-content"></div></div>
     <div class="pairing-settings" aria-label="配对设置" hidden></div>
@@ -75,6 +78,8 @@ export function mountDetailsPanel(
 
   const panel = root.querySelector<HTMLElement>('.details-panel')!
   const title = root.querySelector<HTMLElement>('.details-title')!
+  const weeklyQuotaNote = root.querySelector<HTMLElement>('.weekly-quota-note')!
+  const resetLabel = root.querySelector<HTMLElement>('.reset-label')!
   const resetValue = root.querySelector<HTMLElement>('.reset-value')!
   const planValue = root.querySelector<HTMLElement>('.plan-value')!
   const creditsValue = root.querySelector<HTMLElement>('.credits-value')!
@@ -116,8 +121,12 @@ export function mountDetailsPanel(
 
   return {
     update(snapshot) {
-      title.textContent = `本周剩余 ${value(snapshot.quotaRemainingPercent)}${snapshot.quotaRemainingPercent === undefined ? '' : '%'}`
-      resetValue.textContent = formatResetTime(snapshot.quotaResetsAt)
+      const plus = isPlusPlan(snapshot)
+      const percent = quotaPercent(snapshot)
+      title.textContent = `${plus ? '5小时额度剩余' : '本周剩余'} ${value(percent)}${percent === undefined ? '' : '%'}`
+      resetLabel.textContent = plus ? '5小时额度重置时间' : '下次重置'
+      resetValue.textContent = formatResetTime(plus ? snapshot.fiveHourResetsAt : snapshot.quotaResetsAt)
+      weeklyQuotaNote.textContent = plus ? `本周剩余 ${value(snapshot.quotaRemainingPercent)}${snapshot.quotaRemainingPercent === undefined ? '' : '%'}，重置时间为 ${formatResetDate(snapshot.quotaResetsAt)}` : ''
       planValue.textContent = value(snapshot.plan)
       creditsValue.textContent = value(snapshot.resetCredits)
       tokenDetailLabel.textContent = snapshot.usageDate ? `Token · ${snapshot.usageDate.slice(5)}` : '本日 Token'
@@ -135,7 +144,7 @@ export function mountDetailsPanel(
         lastTaskSignature = signature
       }
       renderTaskCounts(taskCount, snapshot)
-      historyWindow.textContent = '当天 24 小时'
+      historyWindow.textContent = '最近 7 天'
       renderHistory(historyContent, snapshot)
     },
     setRefreshing(value) {

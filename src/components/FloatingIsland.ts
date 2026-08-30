@@ -23,6 +23,14 @@ function tokenLabel(snapshot: Snapshot) {
   return snapshot.usageDate ? `Token · ${snapshot.usageDate.slice(5)}` : '本日 Token'
 }
 
+function isPlusPlan(snapshot: Snapshot) {
+  return snapshot.plan?.trim().toLowerCase() === 'plus'
+}
+
+function quotaPercent(snapshot: Snapshot) {
+  return isPlusPlan(snapshot) ? snapshot.fiveHourRemainingPercent : snapshot.quotaRemainingPercent
+}
+
 function drawQuotaRing(ring: HTMLElement, percent?: number) {
   const value = percent === undefined ? 0 : Math.max(0, Math.min(100, percent))
   ring.style.setProperty('--quota', `${value * 3.6}deg`)
@@ -85,7 +93,7 @@ export function mountFloatingBall(root: HTMLElement, onOpen: () => void): Mounte
   wireDoubleClickOrDrag(button, onOpen)
   return {
     update(snapshot) {
-      const percent = snapshot.quotaRemainingPercent
+      const percent = quotaPercent(snapshot)
       percentLabel.textContent = percent === undefined ? '--' : `${percent}%`
       button.classList.toggle('island-stale', snapshot.status !== 'fresh')
       const status = statusFor(snapshot)
@@ -122,10 +130,10 @@ export function mountFloatingIsland(root: HTMLElement, onOpen: () => void): Moun
   wireDoubleClickOrDrag(button, onOpen)
   return {
     update(snapshot) {
-      const percent = snapshot.quotaRemainingPercent
+      const percent = quotaPercent(snapshot)
       percentLabel.textContent = percent === undefined ? '--' : `${percent}%`
       button.classList.toggle('island-stale', snapshot.status !== 'fresh')
-      quotaCopy.textContent = snapshot.status !== 'fresh' ? '数据待确认' : '额度可用'
+      quotaCopy.textContent = snapshot.status !== 'fresh' ? '数据待确认' : isPlusPlan(snapshot) ? '5小时额度可用' : '额度可用'
       const summary = islandSummary(snapshot)
       taskDot.style.setProperty('--status-color', STATUS_COLOR[summary.status])
       taskCopy.textContent = summary.taskCount ? '任务状态' : statusLabel.none
