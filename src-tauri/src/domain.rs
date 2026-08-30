@@ -110,6 +110,10 @@ pub struct Snapshot {
     pub fetched_at: Option<i64>,
     pub quota_remaining_percent: Option<u8>,
     pub quota_resets_at: Option<i64>,
+    #[serde(default)]
+    pub five_hour_remaining_percent: Option<u8>,
+    #[serde(default)]
+    pub five_hour_resets_at: Option<i64>,
     pub plan: Option<String>,
     pub reset_credits: Option<u64>,
     pub today_tokens: Option<u64>,

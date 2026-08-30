@@ -62,6 +62,8 @@ export interface Snapshot {
   fetchedAt?: number
   quotaRemainingPercent?: number
   quotaResetsAt?: number
+  fiveHourRemainingPercent?: number
+  fiveHourResetsAt?: number
   plan?: string
   resetCredits?: number
   todayTokens?: number
@@ -75,7 +77,7 @@ export interface Snapshot {
   schemaVersion: string
 }
 
-export type SnapshotChanges = Partial<Pick<Snapshot, 'status' | 'changedAt' | 'source' | 'fetchedAt' | 'quotaRemainingPercent' | 'quotaResetsAt' | 'plan' | 'resetCredits' | 'todayTokens' | 'usageDate' | 'activeTaskCount' | 'taskCounts' | 'tasks' | 'error' | 'history' | 'hookDiagnostics' | 'schemaVersion'>>
+export type SnapshotChanges = Partial<Pick<Snapshot, 'status' | 'changedAt' | 'source' | 'fetchedAt' | 'quotaRemainingPercent' | 'quotaResetsAt' | 'fiveHourRemainingPercent' | 'fiveHourResetsAt' | 'plan' | 'resetCredits' | 'todayTokens' | 'usageDate' | 'activeTaskCount' | 'taskCounts' | 'tasks' | 'error' | 'history' | 'hookDiagnostics' | 'schemaVersion'>>
 
 function tasksEqual(left: Snapshot['tasks'], right: Snapshot['tasks']) {
   if (left.length !== right.length) return false
@@ -110,7 +112,7 @@ function hookDiagnosticsEqual(left: Snapshot['hookDiagnostics'], right: Snapshot
 /** Return only fields that changed so mounted views can update stable DOM nodes. */
 export function diffSnapshot(previous: Snapshot, next: Snapshot): SnapshotChanges {
   const changes: SnapshotChanges = {}
-  const scalarKeys: Array<keyof Snapshot> = ['status', 'changedAt', 'source', 'fetchedAt', 'quotaRemainingPercent', 'quotaResetsAt', 'plan', 'resetCredits', 'todayTokens', 'usageDate', 'activeTaskCount', 'error', 'history', 'schemaVersion']
+  const scalarKeys: Array<keyof Snapshot> = ['status', 'changedAt', 'source', 'fetchedAt', 'quotaRemainingPercent', 'quotaResetsAt', 'fiveHourRemainingPercent', 'fiveHourResetsAt', 'plan', 'resetCredits', 'todayTokens', 'usageDate', 'activeTaskCount', 'error', 'history', 'schemaVersion']
   scalarKeys.filter((key) => key !== 'history').forEach((key) => { if (previous[key] !== next[key]) (changes as Record<string, unknown>)[key] = next[key] })
   if (!taskCountsEqual(previous.taskCounts, next.taskCounts)) changes.taskCounts = next.taskCounts
   if (!historyEqual(previous.history, next.history)) changes.history = next.history
@@ -131,6 +133,8 @@ export function normalizeSnapshot(input: unknown): Snapshot {
     fetchedAt: asNumber(raw.fetchedAt ?? raw.fetched_at),
     quotaRemainingPercent: asNumber(raw.quotaRemainingPercent ?? raw.quota_remaining_percent),
     quotaResetsAt: asNumber(raw.quotaResetsAt ?? raw.quota_resets_at),
+    fiveHourRemainingPercent: asNumber(raw.fiveHourRemainingPercent ?? raw.five_hour_remaining_percent),
+    fiveHourResetsAt: asNumber(raw.fiveHourResetsAt ?? raw.five_hour_resets_at),
     plan: typeof raw.plan === 'string' ? raw.plan : undefined,
     resetCredits: asNumber(raw.resetCredits ?? raw.reset_credits),
     todayTokens: asNumber(raw.todayTokens ?? raw.today_tokens),

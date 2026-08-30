@@ -10,6 +10,34 @@ mod tests {
         assert_eq!(response.plan.as_deref(), Some("Plus"));
     }
     #[test]
+    fn parses_plus_five_hour_limit_without_replacing_weekly_primary() {
+        let response = parse_rate_limits(
+            r#"{
+                "rateLimits": {
+                    "primary": {"usedPercent": 17, "resetsAt": 1765401600},
+                    "secondary": {"usedPercent": 38, "resetsAt": 1765382400},
+                    "planType": "Plus"
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(response.remaining_percent, Some(83));
+        assert_eq!(response.resets_at, Some(1765401600));
+        assert_eq!(response.five_hour_remaining_percent, Some(62));
+        assert_eq!(response.five_hour_resets_at, Some(1765382400));
+    }
+
+    #[test]
+    fn keeps_five_hour_fields_empty_when_secondary_is_missing() {
+        let response = parse_rate_limits(
+            r#"{"rateLimits":{"primary":{"usedPercent":17},"planType":"Plus"}}"#,
+        )
+        .unwrap();
+        assert_eq!(response.remaining_percent, Some(83));
+        assert_eq!(response.five_hour_remaining_percent, None);
+        assert_eq!(response.five_hour_resets_at, None);
+    }
+    #[test]
     fn parses_usage_tokens() {
         let usage = parse_usage(include_str!("../fixtures/usage.json")).unwrap();
         assert_eq!(usage.today_tokens, Some(128400));

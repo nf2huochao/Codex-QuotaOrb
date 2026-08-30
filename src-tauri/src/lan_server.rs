@@ -753,6 +753,8 @@ mod tests {
             fetched_at: None,
             quota_remaining_percent: None,
             quota_resets_at: None,
+            five_hour_remaining_percent: None,
+            five_hour_resets_at: None,
             plan: None,
             reset_credits: None,
             today_tokens: None,

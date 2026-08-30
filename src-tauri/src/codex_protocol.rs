@@ -16,6 +16,10 @@ pub enum ProtocolError {
 pub struct RateLimitResponse {
     pub remaining_percent: Option<u8>,
     pub resets_at: Option<i64>,
+    #[serde(default)]
+    pub five_hour_remaining_percent: Option<u8>,
+    #[serde(default)]
+    pub five_hour_resets_at: Option<i64>,
     pub plan: Option<String>,
     pub reset_credits: Option<u64>,
 }
@@ -96,6 +100,29 @@ pub fn parse_rate_limits(input: &str) -> Result<RateLimitResponse, ProtocolError
             .or_else(|| primary.get("reset_at"))
             .or_else(|| primary.get("resetsAt")),
     );
+    let secondary = snapshot
+        .get("secondary")
+        .or_else(|| snapshot.get("secondaryLimit"))
+        .or_else(|| snapshot.get("fiveHour"))
+        .or_else(|| snapshot.get("five_hour"));
+    let five_hour_remaining_percent = secondary.and_then(|limit| {
+        as_u64(limit.get("remaining_percent").or_else(|| limit.get("remainingPercent")))
+            .or_else(|| as_u64(limit.get("usedPercent")).map(|used| 100u64.saturating_sub(used)))
+            .or_else(|| {
+                as_u64(limit.get("limit"))
+                    .zip(as_u64(limit.get("used")))
+                    .map(|(limit, used)| limit.saturating_sub(used) * 100 / limit.max(1))
+            })
+            .map(|v| v.min(100) as u8)
+    });
+    let five_hour_resets_at = secondary.and_then(|limit| {
+        as_i64(
+            limit
+                .get("resets_at")
+                .or_else(|| limit.get("reset_at"))
+                .or_else(|| limit.get("resetsAt")),
+        )
+    });
     let credits = root
         .get("rateLimitResetCredits")
         .or_else(|| root.get("credits"))
@@ -120,6 +147,8 @@ pub fn parse_rate_limits(input: &str) -> Result<RateLimitResponse, ProtocolError
     Ok(RateLimitResponse {
         remaining_percent,
         resets_at,
+        five_hour_remaining_percent,
+        five_hour_resets_at,
         plan,
         reset_credits,
     })

@@ -44,6 +44,8 @@ pub async fn poll_once(
                 fetched_at: Some(now),
                 quota_remaining_percent: rate.remaining_percent,
                 quota_resets_at: rate.resets_at,
+                five_hour_remaining_percent: rate.five_hour_remaining_percent,
+                five_hour_resets_at: rate.five_hour_resets_at,
                 plan: rate.plan,
                 reset_credits: rate.reset_credits,
                 today_tokens: usage.today_tokens,
@@ -453,6 +455,8 @@ pub fn spawn_poll_loop(
                                 next.fetched_at = Some(now);
                                 next.quota_remaining_percent = rate.remaining_percent;
                                 next.quota_resets_at = rate.resets_at;
+                                next.five_hour_remaining_percent = rate.five_hour_remaining_percent;
+                                next.five_hour_resets_at = rate.five_hour_resets_at;
                                 next.plan = rate.plan;
                                 next.reset_credits = rate.reset_credits;
                                 next.today_tokens = usage.today_tokens;
@@ -479,6 +483,8 @@ pub fn spawn_poll_loop(
                         next.fetched_at = Some(now);
                         next.quota_remaining_percent = rate.remaining_percent;
                         next.quota_resets_at = rate.resets_at;
+                        next.five_hour_remaining_percent = rate.five_hour_remaining_percent;
+                        next.five_hour_resets_at = rate.five_hour_resets_at;
                         next.plan = rate.plan;
                         next.reset_credits = rate.reset_credits;
                         next.today_tokens = usage.today_tokens;
