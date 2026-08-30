@@ -113,13 +113,14 @@ export function renderFloatingBall(root: HTMLElement, snapshot: Snapshot, onOpen
 
 export function mountFloatingIsland(root: HTMLElement, onOpen: () => void): MountedView {
   root.innerHTML = `<button class="island-shell" aria-label="打开额度详情" type="button" data-tauri-drag-region>
-    <span class="island-segment quota-segment"><span class="quota-gauge"><span class="quota-ring" aria-hidden="true"></span><b></b></span><span><small>本周剩余</small><strong class="quota-copy"></strong></span></span>
+    <span class="island-segment quota-segment"><span class="quota-gauge"><span class="quota-ring" aria-hidden="true"></span><b></b></span><span><small class="quota-label">本周剩余</small><strong class="quota-copy"></strong></span></span>
     <span class="island-segment task-segment"><span class="status-dot"></span><span class="task-status-copy"><small>任务状态</small><strong class="task-copy"></strong><span class="task-counts" aria-label="任务状态统计"></span></span></span>
     <span class="island-segment token-segment"><span><small class="token-label"></small><strong class="token-copy"></strong></span></span>
   </button>`
   const button = root.querySelector<HTMLButtonElement>('.island-shell')!
   const ring = root.querySelector<HTMLElement>('.quota-ring')!
   const percentLabel = root.querySelector<HTMLElement>('.quota-gauge b')!
+  const quotaLabel = root.querySelector<HTMLElement>('.quota-label')!
   const quotaCopy = root.querySelector<HTMLElement>('.quota-copy')!
   const taskDot = root.querySelector<HTMLElement>('.status-dot')!
   const taskCopy = root.querySelector<HTMLElement>('.task-copy')!
@@ -133,6 +134,7 @@ export function mountFloatingIsland(root: HTMLElement, onOpen: () => void): Moun
       const percent = quotaPercent(snapshot)
       percentLabel.textContent = percent === undefined ? '--' : `${percent}%`
       button.classList.toggle('island-stale', snapshot.status !== 'fresh')
+      quotaLabel.textContent = isPlusPlan(snapshot) ? '5小时额度剩余' : '本周剩余'
       quotaCopy.textContent = snapshot.status !== 'fresh' ? '数据待确认' : isPlusPlan(snapshot) ? '5小时额度可用' : '额度可用'
       const summary = islandSummary(snapshot)
       taskDot.style.setProperty('--status-color', STATUS_COLOR[summary.status])

@@ -20,7 +20,7 @@ describe('compact floating island', () => {
     expect(open).toHaveBeenCalledTimes(1)
   })
   it('shows quota ring, canonical task count and compact tokens', () => { const root = document.createElement('div'); renderFloatingIsland(root, base(), vi.fn()); expect(root.textContent).toContain('72%'); expect(root.textContent).toContain('3'); expect(root.querySelector('[data-status="running"]')).toBeTruthy(); expect(root.textContent).toContain('12.8万'); expect(root.querySelector('.quota-ring')).toBeTruthy(); expect(root.querySelector('canvas,img')).toBeNull(); expect(root.querySelector<HTMLElement>('.quota-ring')?.style.getPropertyValue('--quota')).toBe('259.2deg') })
-  it('uses the five-hour quota for Plus without changing task data', () => { const root = document.createElement('div'); renderFloatingIsland(root, { ...base(), quotaRemainingPercent: 91, fiveHourRemainingPercent: 62 }, vi.fn()); expect(root.textContent).toContain('62%'); expect(root.textContent).toContain('5小时额度可用'); expect(root.textContent).not.toContain('91%') })
+  it('uses the five-hour quota for Plus without changing task data', () => { const root = document.createElement('div'); renderFloatingIsland(root, { ...base(), quotaRemainingPercent: 91, fiveHourRemainingPercent: 62 }, vi.fn()); expect(root.textContent).toContain('62%'); expect(root.textContent).toContain('5小时额度剩余'); expect(root.textContent).toContain('5小时额度可用'); expect(root.textContent).not.toContain('91%') })
   it('shows green completion as soon as one task is complete', () => {
     const root = document.createElement('div')
     const snapshot = { ...base(), taskCounts: { none: 0, needsAction: 0, running: 1, completed: 1 }, tasks: [
