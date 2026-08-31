@@ -51,7 +51,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY5RkQzOUM1NDFENzIyRTUKUldUbEl0ZEJ4VG45K1YzVXhtaWQyWHh6SFB0N1dCc05BVGtlNXhqdU5pdHJDejV1eXFUSXNJWU4K",
       "endpoints": [
-        "https://github.com/nf2huochao/Codex-Floating-ball/releases/latest/download/latest.json"
+        "https://github.com/nf2huochao/Codex-QuotaOrb/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

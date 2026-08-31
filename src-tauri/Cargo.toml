@@ -4,7 +4,7 @@ version = "0.1.9"
 description = "Codex quota floating window for Windows"
 authors = ["nf2huochao"]
 license = ""
-repository = "https://github.com/nf2huochao/Codex-Floating-ball"
+repository = "https://github.com/nf2huochao/Codex-QuotaOrb"
 edition = "2021"
 rust-version = "1.77.2"
 

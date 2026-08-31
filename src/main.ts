@@ -189,8 +189,9 @@ if (!designPreview) {
       const result = await invoke<{ message: string; available: boolean }>('check_for_updates')
       window.alert(result.message)
       if (result.available) await invoke('relaunch_app')
-    } catch {
-      window.alert('网页预览不支持检查更新，请安装桌面版后使用')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      window.alert(`检查更新失败：${message}`)
     }
   })
   window.setInterval(refresh, 120_000)
