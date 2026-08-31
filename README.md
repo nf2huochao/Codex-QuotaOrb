@@ -39,7 +39,9 @@ The LAN web view is a first-class use case. Open the pairing address on a phone 
 - **统一任务状态 / Unified task state** — 任务使用黄色（执行中）、红色（需要批准/拒绝）、绿色（完成可验收）和灰色（无活跃任务）。胶囊和详情页来自同一份任务快照。 Yellow means running, red means approval/rejection is needed, green means completed and ready for review, and gray means no active task. The capsule and details page share one task snapshot.
 - **任务阻塞提示 / Possible-blocking hint** — 长时间没有新事件时，以紧凑的橙红提示点提醒可能阻塞，不把普通文本关键词当成状态。 A compact orange-red indicator can flag a possible stall without treating arbitrary log text as state.
 - **本日 Token / Daily Token** — 紧凑视图和详情页显示当天累计 Token，并使用万、亿等中文单位缩写。 Compact views show the daily total with Chinese unit formatting.
+- **Codex 重置预测 / Reset forecast** — 详情页和手机局域网网页显示未来 24 小时重置概率、距上次重置时间、近 30 天重置次数、平均等待时间和最近重置时间，并提供 LunarWerx 公开数据证据链接。 The desktop details page and LAN web view show reset forecast metrics with a public LunarWerx evidence link.
 - **168 小时额度视图 / 168-hour quota view** — 详情页固定显示最近 7 天 × 24 小时的额度位置；已采样小时用细柱高度表示周额度，未采样位置保持空白。 The details page keeps all 168 hourly positions visible; sampled hours use slim bar heights and unsampled hours stay empty.
+- **采样状态区分 / Sampling distinction** — 近期趋势中的真实采样使用橙色细柱，推算或沿用数据使用低饱和绿色，便于区分数据来源。 Real samples use orange bars while inferred or carried-forward values remain muted green.
 - **局域网网页 / LAN web view** — 同一 Wi‑Fi 下通过浏览器查看，支持手机、平板和 Kindle 等设备。 Observe from phones, tablets, and Kindle browsers on the same Wi‑Fi.
 - **托盘控制 / Tray controls** — 刷新、配对设置、开机自启、检查更新和退出集中在托盘菜单。 Refresh, pairing, startup, update check, and quit are available from the tray.
 - **透明图标 / Transparent identity** — 桌面快捷方式、托盘和安装包使用透明圆环图标，避免矩形底色。
@@ -85,12 +87,13 @@ This project is released under the [MIT License](LICENSE). You may use, modify, 
 
 ## 当前更新状态 / Current release status
 
-**v0.1.8 — 2026-08-31 — 稳定测试版 / stable test release**
+**v0.1.9 — 2026-09-01 — 最新稳定测试版 / latest stable test release**
 
-- 新增 Plus 套餐 5 小时额度与周额度的分开显示，并保留带日期的 Token 数据。
-- 将近期趋势改为固定最近 7 天 × 24 小时的一行细柱，不再使用滚轮切换或原生滑轨；桌面端和手机网页端均完整显示 168 个小时位置。
-- 未采样位置保持空白，避免把旧额度误显示为当前采样；悬浮球、详情页和局域网网页继续共享同一任务快照。
-- Windows x64 安装包可直接测试；签名自动更新需要在 GitHub Actions 中配置仓库 Secrets，详见 [`docs/release-signing.md`](docs/release-signing.md)。
+- 新增“Codex 重置预测”专栏，桌面详情页和手机局域网网页均显示 24 小时重置概率、距上次重置时间、近 30 天重置次数、平均等待时间和最近重置时间，并标注 LunarWerx 来源与“查看证据”链接。
+- 近期趋势固定显示最近 7 天 × 24 小时的一行细柱，共 168 个位置；真实采样用橙色，推算或沿用数据用低饱和绿色，桌面端和手机网页端都不再出现原生滑轨。
+- 继续保持任务状态、Token、套餐、周额度、配对和可用重置机会逻辑不变；预测来源不可访问时只显示明确的不可用状态。
+- [下载 v0.1.9 Windows x64 安装包](https://github.com/nf2huochao/Codex-QuotaOrb/releases/download/v0.1.9/Codex._0.1.9_x64-setup.exe) · [查看 GitHub 发行版](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v0.1.9)。构建与测试已验证：`npm run build` 通过，39 项测试全部通过。
+- 当前发行包为 Windows x64 测试包；签名自动更新需要在 GitHub Actions 中配置仓库 Secrets，详见 [`docs/release-signing.md`](docs/release-signing.md)。
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the bilingual release notes.
 

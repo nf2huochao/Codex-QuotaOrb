@@ -22,7 +22,7 @@ Codex 额度悬浮窗的主要新增、改进和修复均在此以中英文记�
 
 ### Release notes / 发行说明
 
-- Windows installer: `Codex 额度悬浮窗_0.1.9_x64-setup.exe`. / Windows 安装包：`Codex 额度悬浮窗_0.1.9_x64-setup.exe`。
+- Windows installer: [`Codex._0.1.9_x64-setup.exe`](https://github.com/nf2huochao/Codex-QuotaOrb/releases/download/v0.1.9/Codex._0.1.9_x64-setup.exe). / Windows 安装包：[`Codex._0.1.9_x64-setup.exe`](https://github.com/nf2huochao/Codex-QuotaOrb/releases/download/v0.1.9/Codex._0.1.9_x64-setup.exe)。
 - Build and test verification: `npm run build` passed; 39 tests passed. / 构建与测试验证：`npm run build` 通过，39 项测试全部通过。
 
 ## v0.1.8 — 2026-08-31
