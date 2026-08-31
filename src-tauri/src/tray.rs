@@ -8,7 +8,7 @@ use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 pub const MENU_ITEMS: [&str; 7] = [
     "显示悬浮球",
     "隐藏悬浮球",
-    "立即更新",
+    "更新数据",
     "开机自启",
     "检查更新",
     "关于",
@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn menu_contains_core_controls() {
         assert!(MENU_ITEMS.contains(&"显示悬浮球"));
-        assert!(MENU_ITEMS.contains(&"立即更新"));
+        assert!(MENU_ITEMS.contains(&"更新数据"));
         assert!(MENU_ITEMS.contains(&"开机自启"));
         assert!(MENU_ITEMS.contains(&"退出"));
     }

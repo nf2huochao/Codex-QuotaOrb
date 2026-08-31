@@ -212,7 +212,7 @@ export function mountDetailsPanel(
     setRefreshing(value) {
       refreshButton.disabled = value
       refreshButton.classList.toggle('is-refreshing', value)
-      refreshButton.textContent = value ? '正在更新…' : '立即更新'
+      refreshButton.textContent = value ? '正在更新…' : '更新数据'
     },
     setPairingSettingsOpen(value) {
       currentPairingOpen = value
