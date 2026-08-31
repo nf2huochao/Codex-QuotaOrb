@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.8"
+version = "0.1.9"
 description = "Codex quota floating window for Windows"
 authors = ["nf2huochao"]
 license = ""
