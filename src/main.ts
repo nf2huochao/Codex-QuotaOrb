@@ -184,6 +184,9 @@ if (!designPreview) {
   void refresh()
   void listen<Snapshot>('snapshot-updated', (event) => queueSnapshot(event.payload))
   void listen('refresh-requested', () => { void refresh() })
+  void listen<string>('autostart-error', (event) => {
+    window.alert(`开机自启设置失败：${event.payload}`)
+  })
   void listen('update-check-requested', async () => {
     try {
       const result = await invoke<{ message: string; available: boolean }>('check_for_updates')
