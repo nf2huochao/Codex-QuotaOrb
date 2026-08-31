@@ -204,7 +204,6 @@ export function mountDetailsPanel(
       }
       renderTaskCounts(taskCount, snapshot)
       historySnapshot = snapshot
-      if (!snapshot.previousHistory.length && historyView === 'previous') historyView = 'current'
       historyWindow.textContent = historyView === 'previous' ? '上一周期' : '本周期'
       historyToggle.hidden = false
       historyToggle.textContent = historyView === 'previous' ? '返回本周期' : '查看上一周期'
