@@ -60,6 +60,30 @@ fn trim_history(mut history: Vec<UsagePoint>) -> Vec<UsagePoint> {
     history
 }
 
+fn cycle_start_bucket(cycle_key: Option<i64>) -> Option<i64> {
+    cycle_key
+        .and_then(|key| local_hour_bucket(key - 168 * 3600).map(|(bucket, _)| bucket))
+}
+
+fn seed_cycle_baseline(mut history: Vec<UsagePoint>, cycle_key: Option<i64>) -> Vec<UsagePoint> {
+    let Some(start) = cycle_start_bucket(cycle_key) else {
+        return history;
+    };
+    if let Some(point) = history.iter_mut().find(|point| {
+        local_hour_bucket(point.at)
+            .map(|(bucket, _)| bucket == start)
+            .unwrap_or(false)
+    }) {
+        point.quota_remaining_percent = Some(100);
+    } else {
+        history.push(UsagePoint {
+            at: start,
+            quota_remaining_percent: Some(100),
+        });
+    }
+    trim_history(history)
+}
+
 #[derive(Clone)]
 pub struct SnapshotStore {
     state: Arc<Mutex<Snapshot>>,
@@ -80,11 +104,12 @@ impl SnapshotStore {
         initial.task_counts = crate::domain::TaskCounts::from_tasks(&initial.tasks);
         initial.active_task_count = initial.task_counts.needs_action + initial.task_counts.running;
         if initial.status == crate::domain::DataStatus::Fresh {
-            initial.history = merge_hourly_history(
+            let history = merge_hourly_history(
                 &initial.history,
                 initial.fetched_at.or(initial.changed_at),
                 initial.quota_remaining_percent,
             );
+            initial.history = seed_cycle_baseline(history, initial.history_cycle_key);
         }
         let acknowledged = initial
             .tasks
@@ -221,11 +246,12 @@ impl SnapshotStore {
                 }
             }
             current_cycle_key = detected_cycle_key.or(current_cycle_key);
-            merge_hourly_history(
+            let history = merge_hourly_history(
                 &current_history,
                 snapshot.fetched_at.or(snapshot.changed_at),
                 snapshot.quota_remaining_percent,
-            )
+            );
+            seed_cycle_baseline(history, current_cycle_key)
         } else {
             current_history
         };
@@ -542,6 +568,23 @@ mod tests {
         assert_eq!(store.current().history.len(), 1);
         assert_eq!(store.current().history[0].quota_remaining_percent, Some(64));
         assert_eq!(store.current().history_cycle_key, Some(0));
+    }
+
+    #[test]
+    fn weekly_history_always_starts_at_one_hundred_percent() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let mut initial = snapshot();
+        initial.fetched_at = Some(now);
+        initial.changed_at = Some(now);
+        initial.quota_remaining_percent = Some(94);
+        initial.quota_resets_at = Some(now + 168 * 3600);
+        let (store, _) = SnapshotStore::new(initial);
+        let current = store.current();
+        assert_eq!(current.history.first().and_then(|point| point.quota_remaining_percent), Some(100));
+        assert_eq!(current.history.last().and_then(|point| point.quota_remaining_percent), Some(100));
     }
 
     #[test]

@@ -47,7 +47,6 @@ function renderHistory(root: HTMLElement, snapshot: Snapshot, view: HistoryView)
   }
   const cells: string[] = []
   const values: number[] = []
-  let carried: { at: number; quota: number } | undefined
   const cycleKey = view === 'previous' ? snapshot.previousHistoryCycleKey : snapshot.historyCycleKey
   const cycleStart = cycleKey
     ? new Date((cycleKey - HISTORY_DAYS * HOURS_PER_DAY * 3600) * 1000)
@@ -57,11 +56,16 @@ function renderHistory(root: HTMLElement, snapshot: Snapshot, view: HistoryView)
         return fallback
       })()
   cycleStart.setMinutes(0, 0, 0)
+  let carried: { at: number; quota: number } | undefined = view === 'current'
+    ? { at: Math.floor(cycleStart.getTime() / 1000), quota: 100 }
+    : undefined
   for (let index = 0; index < HISTORY_DAYS * HOURS_PER_DAY; index += 1) {
       const cellDate = new Date(cycleStart.getTime() + index * 3600 * 1000)
       const label = `${cellDate.getMonth() + 1}/${cellDate.getDate()} ${String(cellDate.getHours()).padStart(2, '0')}:00`
       const point = points.get(historyHourKey(cellDate))
-      if (point) {
+      if (point && index === 0 && view === 'current') {
+        cells.push(`<i class="history-slot has-value is-inferred" style="--slot-height:100%" title="${label} · 100%（周期起始额度）" aria-label="${label} · 周额度 100%，周期起始额度"></i>`)
+      } else if (point) {
         carried = point
         values.push(point.quota)
         cells.push(`<i class="history-slot has-value" style="--slot-height:${Math.max(0, Math.min(100, point.quota))}%" title="${label} · ${point.quota}%" aria-label="${label} · 周额度 ${point.quota}%"></i>`)
@@ -73,8 +77,9 @@ function renderHistory(root: HTMLElement, snapshot: Snapshot, view: HistoryView)
   }
   const first = sorted[0]?.quotaRemainingPercent
   const last = sorted.at(-1)?.quotaRemainingPercent
-  const summaryLabel = values.length ? (view === 'previous' ? '已保存上一周期' : '已保存本周期') : '暂无成功采样'
-  root.innerHTML = `<div class="history-summary"><span>周额度 ${first ?? '--'}% → ${last ?? '--'}%</span><span>${summaryLabel}</span></div><div class="history-grid" role="grid" aria-label="${view === 'previous' ? '上一周期' : '本周期'}每小时周额度趋势">${cells.join('')}</div>`
+  const summaryLabel = values.length ? (view === 'previous' ? '已保存上一周期' : '已保存本周期') : (view === 'previous' ? '无数据' : '暂无成功采样')
+  const summaryStart = view === 'current' && (first === undefined || first !== 100) ? 100 : first
+  root.innerHTML = `<div class="history-summary"><span>周额度 ${summaryStart ?? '--'}% → ${last ?? '--'}%</span><span>${summaryLabel}</span></div><div class="history-grid" role="grid" aria-label="${view === 'previous' ? '上一周期' : '本周期'}每小时周额度趋势">${cells.join('')}</div>`
 }
 
 function renderTaskCounts(root: HTMLElement, snapshot: Snapshot) {
@@ -200,9 +205,8 @@ export function mountDetailsPanel(
       renderTaskCounts(taskCount, snapshot)
       historySnapshot = snapshot
       if (!snapshot.previousHistory.length && historyView === 'previous') historyView = 'current'
-      const hasPrevious = snapshot.previousHistory.length > 0
       historyWindow.textContent = historyView === 'previous' ? '上一周期' : '本周期'
-      historyToggle.hidden = !hasPrevious
+      historyToggle.hidden = false
       historyToggle.textContent = historyView === 'previous' ? '返回本周期' : '查看上一周期'
       renderHistory(historyContent, snapshot, historyView)
     },
