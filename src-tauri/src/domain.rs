@@ -126,6 +126,12 @@ pub struct Snapshot {
     #[serde(default)]
     pub history: Vec<UsagePoint>,
     #[serde(default)]
+    pub history_cycle_key: Option<i64>,
+    #[serde(default)]
+    pub previous_history: Vec<UsagePoint>,
+    #[serde(default)]
+    pub previous_history_cycle_key: Option<i64>,
+    #[serde(default)]
     pub hook_diagnostics: HookDiagnostics,
     pub schema_version: String,
 }

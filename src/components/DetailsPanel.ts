@@ -24,16 +24,18 @@ function formatTokens(tokens?: number) {
 }
 const HISTORY_DAYS = 7
 const HOURS_PER_DAY = 24
+type HistoryView = 'current' | 'previous'
 
 function historyHourKey(date: Date) {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}`
 }
 
-function renderHistory(root: HTMLElement, snapshot: Snapshot) {
+function renderHistory(root: HTMLElement, snapshot: Snapshot, view: HistoryView) {
   const now = new Date()
   const today = new Date(now)
   today.setHours(0, 0, 0, 0)
-  const sorted = [...snapshot.history]
+  const source = view === 'previous' ? snapshot.previousHistory : snapshot.history
+  const sorted = [...source]
     .filter((point) => point.quotaRemainingPercent !== undefined)
     .sort((left, right) => left.at - right.at)
   const points = new Map<string, { at: number; quota: number }>()
@@ -45,26 +47,34 @@ function renderHistory(root: HTMLElement, snapshot: Snapshot) {
   }
   const cells: string[] = []
   const values: number[] = []
-  for (let dayOffset = HISTORY_DAYS - 1; dayOffset >= 0; dayOffset -= 1) {
-    const day = new Date(today)
-    day.setDate(today.getDate() - dayOffset)
-    for (let hour = 0; hour < HOURS_PER_DAY; hour += 1) {
-      const cellDate = new Date(day)
-      cellDate.setHours(hour, 0, 0, 0)
-      const label = `${cellDate.getMonth() + 1}/${cellDate.getDate()} ${String(hour).padStart(2, '0')}:00`
+  let carried: { at: number; quota: number } | undefined
+  const cycleKey = view === 'previous' ? snapshot.previousHistoryCycleKey : snapshot.historyCycleKey
+  const cycleStart = cycleKey
+    ? new Date((cycleKey - HISTORY_DAYS * HOURS_PER_DAY * 3600) * 1000)
+    : (() => {
+        const fallback = new Date(today)
+        fallback.setDate(today.getDate() - (HISTORY_DAYS - 1))
+        return fallback
+      })()
+  cycleStart.setMinutes(0, 0, 0)
+  for (let index = 0; index < HISTORY_DAYS * HOURS_PER_DAY; index += 1) {
+      const cellDate = new Date(cycleStart.getTime() + index * 3600 * 1000)
+      const label = `${cellDate.getMonth() + 1}/${cellDate.getDate()} ${String(cellDate.getHours()).padStart(2, '0')}:00`
       const point = points.get(historyHourKey(cellDate))
       if (point) {
+        carried = point
         values.push(point.quota)
         cells.push(`<i class="history-slot has-value" style="--slot-height:${Math.max(0, Math.min(100, point.quota))}%" title="${label} · ${point.quota}%" aria-label="${label} · 周额度 ${point.quota}%"></i>`)
+      } else if (carried) {
+        cells.push(`<i class="history-slot has-value is-inferred" style="--slot-height:${Math.max(0, Math.min(100, carried.quota))}%" title="${label} · 沿用 ${carried.quota}%（上次真实采样）" aria-label="${label} · 沿用上次真实采样，周额度 ${carried.quota}%"></i>`)
       } else {
         cells.push(`<i class="history-slot" title="${label} · 暂无采样" aria-label="${label} · 暂无采样"></i>`)
       }
-    }
   }
   const first = sorted[0]?.quotaRemainingPercent
   const last = sorted.at(-1)?.quotaRemainingPercent
-  const summaryLabel = values.length ? '已保存最近 7 天' : '暂无成功采样'
-  root.innerHTML = `<div class="history-summary"><span>周额度 ${first ?? '--'}% → ${last ?? '--'}%</span><span>${summaryLabel}</span></div><div class="history-grid" role="grid" aria-label="最近 7 天每小时周额度趋势">${cells.join('')}</div>`
+  const summaryLabel = values.length ? (view === 'previous' ? '已保存上一周期' : '已保存本周期') : '暂无成功采样'
+  root.innerHTML = `<div class="history-summary"><span>周额度 ${first ?? '--'}% → ${last ?? '--'}%</span><span>${summaryLabel}</span></div><div class="history-grid" role="grid" aria-label="${view === 'previous' ? '上一周期' : '本周期'}每小时周额度趋势">${cells.join('')}</div>`
 }
 
 function renderTaskCounts(root: HTMLElement, snapshot: Snapshot) {
@@ -102,7 +112,7 @@ export function mountDetailsPanel(
     <header class="details-drag-region" data-tauri-drag-region><div data-tauri-drag-region><small data-tauri-drag-region>CODEX 额度状态</small><h1 class="details-title" data-tauri-drag-region></h1><small class="weekly-quota-note" data-tauri-drag-region></small></div><button class="close-button pairing-settings-button" type="button" aria-label="配对设置"></button></header>
     <div class="detail-grid"><div><small class="reset-label">下次重置</small><strong class="reset-value"></strong></div><div><small>当前套餐</small><strong class="plan-value"></strong></div><div><small>可用重置机会</small><strong class="credits-value"></strong></div><div><small class="token-detail-label"></small><strong class="tokens-value"></strong></div></div>
     <div class="freshness"></div>
-    <div class="history-card" aria-label="近期趋势"><div class="history-head"><strong>近期趋势</strong><small class="history-window"></small></div><div class="history-content"></div></div>
+    <div class="history-card" aria-label="近期趋势"><div class="history-head"><strong>近期趋势</strong><div class="history-head-actions"><small class="history-window"></small><button class="history-toggle" type="button" hidden></button></div></div><div class="history-content"></div></div>
     <div class="pairing-settings" aria-label="配对设置" hidden></div>
     <div class="task-header"><strong>任务状态</strong><span class="task-count"></span></div><ul class="task-list"></ul>
     <button class="refresh-button" type="button"></button>
@@ -119,6 +129,7 @@ export function mountDetailsPanel(
   const tokensValue = root.querySelector<HTMLElement>('.tokens-value')!
   const freshness = root.querySelector<HTMLElement>('.freshness')!
   const historyWindow = root.querySelector<HTMLElement>('.history-window')!
+  const historyToggle = root.querySelector<HTMLButtonElement>('.history-toggle')!
   const historyContent = root.querySelector<HTMLElement>('.history-content')!
   const historyCard = root.querySelector<HTMLElement>('.history-card')!
   const pairingSettings = root.querySelector<HTMLElement>('.pairing-settings')!
@@ -130,8 +141,17 @@ export function mountDetailsPanel(
   let currentPairingOpen = pairingSettingsOpen
   let currentPairingInfo = pairingInfo
   let historySnapshot: Snapshot | undefined
+  let historyView: HistoryView = 'current'
 
   pairingButton.addEventListener('click', () => onTogglePairing?.())
+  historyToggle.addEventListener('click', () => {
+    historyView = historyView === 'current' ? 'previous' : 'current'
+    if (historySnapshot) {
+      historyWindow.textContent = historyView === 'previous' ? '上一周期' : '本周期'
+      historyToggle.textContent = historyView === 'previous' ? '返回本周期' : '查看上一周期'
+      renderHistory(historyContent, historySnapshot, historyView)
+    }
+  })
   refreshButton.addEventListener('click', onRefresh)
   if (onAdvance) panel.addEventListener('dblclick', (event) => {
     if ((event.target as HTMLElement).closest('button')) return
@@ -179,8 +199,12 @@ export function mountDetailsPanel(
       }
       renderTaskCounts(taskCount, snapshot)
       historySnapshot = snapshot
-      historyWindow.textContent = '最近 7 天'
-      renderHistory(historyContent, snapshot)
+      if (!snapshot.previousHistory.length && historyView === 'previous') historyView = 'current'
+      const hasPrevious = snapshot.previousHistory.length > 0
+      historyWindow.textContent = historyView === 'previous' ? '上一周期' : '本周期'
+      historyToggle.hidden = !hasPrevious
+      historyToggle.textContent = historyView === 'previous' ? '返回本周期' : '查看上一周期'
+      renderHistory(historyContent, snapshot, historyView)
     },
     setRefreshing(value) {
       refreshButton.disabled = value

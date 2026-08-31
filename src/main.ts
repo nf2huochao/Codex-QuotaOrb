@@ -15,8 +15,8 @@ const previewHistory = Array.from({ length: 168 }, (_, index) => ({
   quotaRemainingPercent: Math.max(22, 81 - Math.floor(index / 24) * 3),
 }))
 const fallback: Snapshot = designPreview
-  ? { status: 'fresh', fetchedAt: previewNow, quotaRemainingPercent: 81, fiveHourRemainingPercent: 67, quotaResetsAt: previewNow + 3 * 3600, fiveHourResetsAt: previewNow + 2 * 3600, plan: 'Plus', resetCredits: 0, todayTokens: 54030000, tasks: [], taskCounts: { none: 0, needsAction: 0, running: 0, completed: 0 }, activeTaskCount: 0, history: previewHistory, schemaVersion: '1.0' }
-  : { status: 'stale', tasks: [], taskCounts: { none: 0, needsAction: 0, running: 0, completed: 0 }, activeTaskCount: 0, history: [], schemaVersion: '1.0', error: '等待连接 Codex app-server' }
+  ? { status: 'fresh', fetchedAt: previewNow, quotaRemainingPercent: 81, fiveHourRemainingPercent: 67, quotaResetsAt: previewNow + 3 * 3600, fiveHourResetsAt: previewNow + 2 * 3600, plan: 'Plus', resetCredits: 0, todayTokens: 54030000, tasks: [], taskCounts: { none: 0, needsAction: 0, running: 0, completed: 0 }, activeTaskCount: 0, history: previewHistory, historyCycleKey: previewNow + 3 * 3600, previousHistory: [], schemaVersion: '1.0' }
+  : { status: 'stale', tasks: [], taskCounts: { none: 0, needsAction: 0, running: 0, completed: 0 }, activeTaskCount: 0, history: [], previousHistory: [], schemaVersion: '1.0', error: '等待连接 Codex app-server' }
 let snapshot = fallback
 type ViewState = 'ball' | 'summary' | 'details'
 let viewState: ViewState = 'ball'

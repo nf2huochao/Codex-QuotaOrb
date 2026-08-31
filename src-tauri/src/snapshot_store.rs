@@ -48,6 +48,18 @@ fn merge_hourly_history(
     history
 }
 
+fn history_cycle_key(reset_at: Option<i64>) -> Option<i64> {
+    reset_at.map(|timestamp| timestamp - timestamp.rem_euclid(3600))
+}
+
+fn trim_history(mut history: Vec<UsagePoint>) -> Vec<UsagePoint> {
+    history.sort_by_key(|point| point.at);
+    if history.len() > 168 {
+        history.drain(0..history.len() - 168);
+    }
+    history
+}
+
 #[derive(Clone)]
 pub struct SnapshotStore {
     state: Arc<Mutex<Snapshot>>,
@@ -61,6 +73,10 @@ impl SnapshotStore {
             initial.history.clear();
         }
         initial.schema_version = crate::domain::SNAPSHOT_SCHEMA_VERSION.into();
+        initial.history_cycle_key = initial
+            .history_cycle_key
+            .or_else(|| history_cycle_key(initial.quota_resets_at));
+        initial.previous_history = trim_history(initial.previous_history);
         initial.task_counts = crate::domain::TaskCounts::from_tasks(&initial.tasks);
         initial.active_task_count = initial.task_counts.needs_action + initial.task_counts.running;
         if initial.status == crate::domain::DataStatus::Fresh {
@@ -93,10 +109,46 @@ impl SnapshotStore {
 
     fn normalize(&self, mut snapshot: Snapshot) -> Snapshot {
         let previous_snapshot = self.state.lock().expect("snapshot lock").clone();
-        let previous_history = previous_snapshot.history.clone();
-        if snapshot.schema_version == "1.0" {
+        let legacy_schema = snapshot.schema_version == "1.0";
+        if legacy_schema {
             snapshot.history.clear();
+            snapshot.history_cycle_key = None;
+            snapshot.previous_history.clear();
+            snapshot.previous_history_cycle_key = None;
         }
+        let incoming_history = snapshot.history.clone();
+        let incoming_history_cycle_key = snapshot.history_cycle_key;
+        let incoming_previous_history = snapshot.previous_history.clone();
+        let incoming_previous_history_cycle_key = snapshot.previous_history_cycle_key;
+        let from_cache = snapshot.source.as_deref() == Some("cache-unconfirmed");
+        let previous_history = previous_snapshot.history.clone();
+        let previous_cycle_key = previous_snapshot
+            .history_cycle_key
+            .or_else(|| history_cycle_key(previous_snapshot.quota_resets_at));
+        let detected_cycle_key = incoming_history_cycle_key
+            .or_else(|| history_cycle_key(snapshot.quota_resets_at));
+        let mut current_history = if from_cache && previous_history.is_empty() {
+            incoming_history
+        } else {
+            previous_history
+        };
+        let mut current_cycle_key = if from_cache && previous_cycle_key.is_none() {
+            incoming_history_cycle_key.or_else(|| history_cycle_key(snapshot.quota_resets_at))
+        } else {
+            previous_cycle_key
+        };
+        let mut previous_history = if from_cache && previous_snapshot.previous_history.is_empty() {
+            incoming_previous_history
+        } else {
+            previous_snapshot.previous_history.clone()
+        };
+        let mut previous_history_cycle_key = if from_cache
+            && previous_snapshot.previous_history_cycle_key.is_none()
+        {
+            incoming_previous_history_cycle_key
+        } else {
+            previous_snapshot.previous_history_cycle_key
+        };
         snapshot.schema_version = crate::domain::SNAPSHOT_SCHEMA_VERSION.into();
         if matches!(
             snapshot.source.as_deref(),
@@ -161,15 +213,26 @@ impl SnapshotStore {
         snapshot.active_task_count = active as u32;
         snapshot.task_counts = crate::domain::TaskCounts::from_tasks(&snapshot.tasks);
         let history = if snapshot.status == crate::domain::DataStatus::Fresh {
+            if let (Some(old_cycle), Some(new_cycle)) = (current_cycle_key, detected_cycle_key) {
+                if old_cycle != new_cycle {
+                    previous_history = trim_history(current_history.clone());
+                    previous_history_cycle_key = Some(old_cycle);
+                    current_history.clear();
+                }
+            }
+            current_cycle_key = detected_cycle_key.or(current_cycle_key);
             merge_hourly_history(
-                &previous_history,
+                &current_history,
                 snapshot.fetched_at.or(snapshot.changed_at),
                 snapshot.quota_remaining_percent,
             )
         } else {
-            previous_history
+            current_history
         };
         snapshot.history = history;
+        snapshot.history_cycle_key = current_cycle_key;
+        snapshot.previous_history = trim_history(previous_history);
+        snapshot.previous_history_cycle_key = previous_history_cycle_key;
         snapshot
     }
 
@@ -281,6 +344,9 @@ pub fn empty_snapshot() -> Snapshot {
         tasks: Vec::<TaskSummary>::new(),
         error: Some("等待首次连接".into()),
         history: Vec::new(),
+        history_cycle_key: None,
+        previous_history: Vec::new(),
+        previous_history_cycle_key: None,
         hook_diagnostics: crate::domain::HookDiagnostics::default(),
         schema_version: crate::domain::SNAPSHOT_SCHEMA_VERSION.into(),
     }
@@ -322,6 +388,9 @@ mod tests {
             }],
             error: None,
             history: Vec::new(),
+            history_cycle_key: None,
+            previous_history: Vec::new(),
+            previous_history_cycle_key: None,
             hook_diagnostics: crate::domain::HookDiagnostics::default(),
             schema_version: crate::domain::SNAPSHOT_SCHEMA_VERSION.into(),
         }
@@ -456,5 +525,58 @@ mod tests {
                 .and_then(|point| point.quota_remaining_percent),
             Some(99)
         );
+    }
+
+    #[test]
+    fn cache_snapshot_restores_history_across_restart() {
+        let (store, _) = SnapshotStore::new(empty_snapshot());
+        let mut cached = snapshot();
+        cached.status = DataStatus::Stale;
+        cached.source = Some("cache-unconfirmed".into());
+        cached.history = vec![UsagePoint {
+            at: 10,
+            quota_remaining_percent: Some(64),
+        }];
+        cached.history_cycle_key = Some(0);
+        store.publish(cached);
+        assert_eq!(store.current().history.len(), 1);
+        assert_eq!(store.current().history[0].quota_remaining_percent, Some(64));
+        assert_eq!(store.current().history_cycle_key, Some(0));
+    }
+
+    #[test]
+    fn new_weekly_cycle_archives_previous_history() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let old_cycle = now - now.rem_euclid(3600) - 168 * 3600;
+        let new_cycle = old_cycle + 168 * 3600;
+        let mut initial = snapshot();
+        initial.status = DataStatus::Stale;
+        initial.fetched_at = Some(now - 3600);
+        initial.quota_resets_at = Some(old_cycle);
+        initial.history_cycle_key = Some(old_cycle);
+        initial.history = vec![UsagePoint {
+            at: now - 3600,
+            quota_remaining_percent: Some(72),
+        }];
+        let (store, _) = SnapshotStore::new(initial);
+
+        let mut next = snapshot();
+        next.fetched_at = Some(now);
+        next.quota_remaining_percent = Some(100);
+        next.quota_resets_at = Some(new_cycle);
+        store.publish(next);
+
+        let current = store.current();
+        assert_eq!(current.history_cycle_key, Some(new_cycle));
+        assert_eq!(current.previous_history_cycle_key, Some(old_cycle));
+        assert_eq!(current.previous_history.len(), 1);
+        assert_eq!(current.previous_history[0].quota_remaining_percent, Some(72));
+        assert!(current
+            .history
+            .iter()
+            .any(|point| point.quota_remaining_percent == Some(100)));
     }
 }

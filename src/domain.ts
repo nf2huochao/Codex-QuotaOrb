@@ -73,11 +73,14 @@ export interface Snapshot {
   tasks: TaskSummary[]
   error?: string
   history: UsagePoint[]
+  historyCycleKey?: number
+  previousHistory: UsagePoint[]
+  previousHistoryCycleKey?: number
   hookDiagnostics?: HookDiagnostics
   schemaVersion: string
 }
 
-export type SnapshotChanges = Partial<Pick<Snapshot, 'status' | 'changedAt' | 'source' | 'fetchedAt' | 'quotaRemainingPercent' | 'quotaResetsAt' | 'fiveHourRemainingPercent' | 'fiveHourResetsAt' | 'plan' | 'resetCredits' | 'todayTokens' | 'usageDate' | 'activeTaskCount' | 'taskCounts' | 'tasks' | 'error' | 'history' | 'hookDiagnostics' | 'schemaVersion'>>
+export type SnapshotChanges = Partial<Pick<Snapshot, 'status' | 'changedAt' | 'source' | 'fetchedAt' | 'quotaRemainingPercent' | 'quotaResetsAt' | 'fiveHourRemainingPercent' | 'fiveHourResetsAt' | 'plan' | 'resetCredits' | 'todayTokens' | 'usageDate' | 'activeTaskCount' | 'taskCounts' | 'tasks' | 'error' | 'history' | 'historyCycleKey' | 'previousHistory' | 'previousHistoryCycleKey' | 'hookDiagnostics' | 'schemaVersion'>>
 
 function tasksEqual(left: Snapshot['tasks'], right: Snapshot['tasks']) {
   if (left.length !== right.length) return false
@@ -98,6 +101,10 @@ function historyEqual(left: Snapshot['history'], right: Snapshot['history']) {
   })
 }
 
+function optionalHistoryEqual(left: Snapshot['history'], right: Snapshot['history']) {
+  return historyEqual(left, right)
+}
+
 function hookDiagnosticsEqual(left: Snapshot['hookDiagnostics'], right: Snapshot['hookDiagnostics']) {
   const a = left ?? { receivedCount: 0 }
   const b = right ?? { receivedCount: 0 }
@@ -112,10 +119,11 @@ function hookDiagnosticsEqual(left: Snapshot['hookDiagnostics'], right: Snapshot
 /** Return only fields that changed so mounted views can update stable DOM nodes. */
 export function diffSnapshot(previous: Snapshot, next: Snapshot): SnapshotChanges {
   const changes: SnapshotChanges = {}
-  const scalarKeys: Array<keyof Snapshot> = ['status', 'changedAt', 'source', 'fetchedAt', 'quotaRemainingPercent', 'quotaResetsAt', 'fiveHourRemainingPercent', 'fiveHourResetsAt', 'plan', 'resetCredits', 'todayTokens', 'usageDate', 'activeTaskCount', 'error', 'history', 'schemaVersion']
+  const scalarKeys: Array<keyof Snapshot> = ['status', 'changedAt', 'source', 'fetchedAt', 'quotaRemainingPercent', 'quotaResetsAt', 'fiveHourRemainingPercent', 'fiveHourResetsAt', 'plan', 'resetCredits', 'todayTokens', 'usageDate', 'activeTaskCount', 'error', 'historyCycleKey', 'previousHistoryCycleKey', 'schemaVersion']
   scalarKeys.filter((key) => key !== 'history').forEach((key) => { if (previous[key] !== next[key]) (changes as Record<string, unknown>)[key] = next[key] })
   if (!taskCountsEqual(previous.taskCounts, next.taskCounts)) changes.taskCounts = next.taskCounts
   if (!historyEqual(previous.history, next.history)) changes.history = next.history
+  if (!optionalHistoryEqual(previous.previousHistory, next.previousHistory)) changes.previousHistory = next.previousHistory
   if (!tasksEqual(previous.tasks, next.tasks)) changes.tasks = next.tasks
   if (!hookDiagnosticsEqual(previous.hookDiagnostics, next.hookDiagnostics)) changes.hookDiagnostics = next.hookDiagnostics
   return changes
@@ -171,6 +179,12 @@ export function normalizeSnapshot(input: unknown): Snapshot {
       const point = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>
       return { at: Number(point.at ?? 0), quotaRemainingPercent: asNumber(point.quotaRemainingPercent ?? point.quota_remaining_percent) }
     }).filter((point) => point.at > 0) : [],
+    historyCycleKey: asNumber(raw.historyCycleKey ?? raw.history_cycle_key),
+    previousHistory: Array.isArray(raw.previousHistory ?? raw.previous_history) ? (Array.isArray(raw.previousHistory) ? raw.previousHistory : raw.previous_history as unknown[]).map((item) => {
+      const point = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>
+      return { at: Number(point.at ?? 0), quotaRemainingPercent: asNumber(point.quotaRemainingPercent ?? point.quota_remaining_percent) }
+    }).filter((point) => point.at > 0) : [],
+    previousHistoryCycleKey: asNumber(raw.previousHistoryCycleKey ?? raw.previous_history_cycle_key),
     hookDiagnostics: (() => {
       const value = (raw.hookDiagnostics ?? raw.hook_diagnostics) as Record<string, unknown> | undefined
       const last = (value?.last && typeof value.last === 'object' ? value.last : undefined) as Record<string, unknown> | undefined

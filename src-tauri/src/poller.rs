@@ -55,6 +55,11 @@ pub async fn poll_once(
                 tasks,
                 error: None,
                 history: previous.history.clone(),
+                // SnapshotStore derives the cycle key from this fresh quota
+                // response so a newly published reset boundary is detected.
+                history_cycle_key: None,
+                previous_history: Vec::new(),
+                previous_history_cycle_key: None,
                 hook_diagnostics: previous.hook_diagnostics.clone(),
                 schema_version: crate::domain::SNAPSHOT_SCHEMA_VERSION.into(),
             };

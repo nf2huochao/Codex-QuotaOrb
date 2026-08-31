@@ -75,10 +75,14 @@ button { font:inherit; }
 .history-card { margin:10px 0 16px; padding:11px 12px; border-radius:15px; background:rgba(230,223,208,.7); box-shadow:var(--shadow-in); }
 .history-head { display:flex; justify-content:space-between; align-items:center; color:#66745f; }
 .history-head small { font-size:10px; }
+.history-head-actions { display:flex; align-items:center; gap:8px; }
+.history-toggle { border:0; border-radius:999px; padding:4px 8px; color:#66745f; background:rgba(247,241,230,.72); box-shadow:2px 3px 6px rgba(135,145,123,.16),-2px -2px 5px rgba(255,255,255,.7); cursor:pointer; font-size:10px; }
+.history-toggle:disabled { cursor:default; opacity:.55; }
 .history-summary { display:flex; justify-content:space-between; margin:7px 0 5px; color:#788474; font-size:11px; }
 .history-grid { display:grid; grid-template-columns:repeat(168,minmax(0,1fr)); grid-template-rows:34px; align-items:end; gap:1px; width:100%; padding:4px 0; }
 .history-slot { display:block; align-self:end; width:100%; height:1px; min-width:0; border-radius:1px 1px 0 0; background:rgba(189,207,174,.28); }
 .history-slot.has-value { height:max(1px,var(--slot-height,1px)); background:var(--sage); box-shadow:inset 0 0 0 1px rgba(255,255,255,.12); }
+.history-slot.is-inferred { opacity:.42; }
 .task-acknowledged { opacity:.55; }
 .ack-button { padding:6px 10px; font-size:11px; }
 .empty-task { padding:14px 0; color:#8a9588; font-size:13px; }
