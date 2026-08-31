@@ -190,7 +190,7 @@ if (!designPreview) {
       window.alert(result.message)
       if (result.available) await invoke('relaunch_app')
     } catch {
-      window.alert('Update check is unavailable in web preview')
+      window.alert('网页预览不支持检查更新，请安装桌面版后使用')
     }
   })
   window.setInterval(refresh, 120_000)
