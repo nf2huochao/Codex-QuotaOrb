@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { diffSnapshot, normalizeSnapshot, Snapshot } from './domain'
 import { mountDetailsPanel, MountedDetailsView } from './components/DetailsPanel'
 import { mountFloatingBall, mountFloatingIsland, MountedView } from './components/FloatingIsland'
+import { fetchResetForecast, ResetForecast, RESET_FORECAST_SOURCE_URL } from './resetForecast'
 
 const app = document.querySelector<HTMLMainElement>('#app')
 if (!app) throw new Error('app root is missing')
@@ -30,6 +31,7 @@ let pairingSettingsOpen = false
 let ballView: MountedView | undefined
 let islandView: MountedView | undefined
 let detailsView: MountedDetailsView | undefined
+let resetForecast: ResetForecast = { status: 'loading', sourceUrl: RESET_FORECAST_SOURCE_URL }
 let snapshotQueue: Snapshot | undefined
 let snapshotQueueTimer: number | undefined
 let lastChangedAt = snapshot.changedAt ?? 0
@@ -96,9 +98,10 @@ function renderView() {
         } catch (error) {
           applySnapshot({ ...snapshot, status: 'error', error: error instanceof Error ? error.message : '批准请求处理失败' })
         }
-      })
+      }, resetForecast)
     }
     detailsView.update(snapshot)
+    detailsView.setResetForecast(resetForecast)
     detailsView.setRefreshing(refreshing)
     if (entering) scheduleDetailsResize()
   } else if (viewState === 'summary') {
@@ -176,10 +179,17 @@ async function acknowledge(taskId: string) {
   }
 }
 
+async function refreshResetForecast() {
+  resetForecast = await fetchResetForecast()
+  detailsView?.setResetForecast(resetForecast)
+  if (viewState === 'details') scheduleDetailsResize()
+}
+
 // A small test bridge uses the same coalesced path as Tauri events in design preview.
 ;(window as Window & { __codexTestApplySnapshot?: (value: unknown) => void }).__codexTestApplySnapshot = queueSnapshot
 
 renderView()
+void refreshResetForecast()
 if (!designPreview) {
   void refresh()
   void listen<Snapshot>('snapshot-updated', (event) => queueSnapshot(event.payload))
@@ -198,4 +208,5 @@ if (!designPreview) {
     }
   })
   window.setInterval(refresh, 120_000)
+  window.setInterval(() => { void refreshResetForecast() }, 300_000)
 }

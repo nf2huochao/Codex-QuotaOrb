@@ -4,6 +4,27 @@ All notable changes to Codex QuotaOrb are documented here in Chinese and English
 
 Codex 额度悬浮窗的主要新增、改进和修复均在此以中英文记录。
 
+## v0.1.9 — 2026-09-01
+
+### Added / 新增
+
+- Added a compact “Codex 重置预测” panel to the desktop details page and LAN mobile web view. It shows the next-24-hour reset probability, elapsed time since the last reset, resets in the last 30 days, average wait, and the latest reset time. / 在桌面详情页和局域网手机网页新增紧凑的“Codex 重置预测”专栏，显示未来 24 小时重置概率、距上次重置时间、近 30 天重置次数、平均等待时间和最近重置时间。
+- Added a LunarWerx source label and “查看证据” link for the public forecast data. / 增加 LunarWerx 数据来源标识和“查看证据”链接。
+
+### Improved / 改进
+
+- Real sampled weekly-quota bars in the recent trend use the accent orange color; inferred or carried-forward values remain muted green. / 近期趋势中真实采样的周额度柱改用橙色，推算或沿用的数据保持低饱和绿色。
+- Forecast data refreshes independently and falls back to a clear unavailable state when the public source cannot be reached. / 预测数据独立刷新，公开来源不可访问时显示明确的不可用状态。
+
+### Scope / 范围
+
+- This release does not change task status, Token, plan, weekly-quota, pairing, or reset-credit logic. / 本版本不改动任务状态、Token、套餐、周额度、配对或可用重置机会逻辑。
+
+### Release notes / 发行说明
+
+- Windows installer: `Codex 额度悬浮窗_0.1.9_x64-setup.exe`. / Windows 安装包：`Codex 额度悬浮窗_0.1.9_x64-setup.exe`。
+- Build and test verification: `npm run build` passed; 39 tests passed. / 构建与测试验证：`npm run build` 通过，39 项测试全部通过。
+
 ## v0.1.8 — 2026-08-31
 
 ### Added / 新增

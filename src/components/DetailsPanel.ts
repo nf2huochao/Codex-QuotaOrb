@@ -1,6 +1,7 @@
 import { Snapshot, STATUS_COLOR, taskStatusCounts, TaskStatus } from '../domain'
 import { ApprovalDecision, renderTaskList } from './TaskList'
 import { MountedView } from './FloatingIsland'
+import { RESET_FORECAST_SOURCE_URL, ResetForecast } from '../resetForecast'
 
 function formatRecentTime(epoch?: number) { return epoch ? new Date(epoch * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--' }
 function formatResetTime(epoch?: number) { return epoch ? new Date(epoch * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '--' }
@@ -21,6 +22,35 @@ function formatTokens(tokens?: number) {
   }
   const value = tokens / 10_000
   return `${Number(value.toFixed(tokens >= 1_000_000 ? 0 : 1))}万`
+}
+
+function formatForecastElapsed(hours?: number) {
+  if (hours === undefined) return '--'
+  const totalMinutes = Math.max(0, Math.round(hours * 60))
+  const days = Math.floor(totalMinutes / (24 * 60))
+  const remainingHours = Math.floor((totalMinutes % (24 * 60)) / 60)
+  const minutes = totalMinutes % 60
+  if (days > 0) return `${days}天${remainingHours}小时`
+  if (remainingHours > 0) return `${remainingHours}小时${minutes}分`
+  return `${minutes}分`
+}
+
+function formatForecastReset(value?: string) {
+  if (!value) return '--'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '--' : date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+function renderResetForecast(root: HTMLElement, forecast: ResetForecast) {
+  const statusText = forecast.status === 'fresh' ? '已更新' : forecast.status === 'loading' ? '读取中' : '暂不可用'
+  const metrics = forecast.status === 'fresh'
+    ? `<div><small>24小时概率</small><strong>${forecast.probability24h === undefined ? '--' : `${Math.round(forecast.probability24h * 100)}%`}</strong></div>
+       <div><small>距上次重置</small><strong>${formatForecastElapsed(forecast.elapsedHours)}</strong></div>
+       <div><small>近30天重置</small><strong>${forecast.resets30d === undefined ? '--' : `${forecast.resets30d}次`}</strong></div>
+       <div><small>平均等待</small><strong>${forecast.averageWaitDays === undefined ? '--' : `${forecast.averageWaitDays}天`}</strong></div>
+       <div><small>最近重置</small><strong>${formatForecastReset(forecast.lastResetAt)}</strong></div>`
+    : `<p class="reset-forecast-empty">${forecast.status === 'loading' ? '正在读取公开预测数据…' : (forecast.error ?? '暂时无法获取公开预测数据')}</p>`
+  root.innerHTML = `<div class="reset-forecast-head"><div><strong>Codex 重置预测</strong><small>公开数据 · LunarWerx</small></div><span class="reset-forecast-status">${statusText}</span></div><div class="reset-forecast-grid">${metrics}</div><div class="reset-forecast-source"><a href="${RESET_FORECAST_SOURCE_URL}" target="_blank" rel="noreferrer">来源：codex.lunarwerx.com</a><a class="reset-forecast-evidence" href="${RESET_FORECAST_SOURCE_URL}" target="_blank" rel="noreferrer">查看证据</a></div>`
 }
 const HISTORY_DAYS = 7
 const HOURS_PER_DAY = 24
@@ -99,6 +129,7 @@ function renderTaskCounts(root: HTMLElement, snapshot: Snapshot) {
 export interface MountedDetailsView extends MountedView {
   setPairingSettingsOpen(value: boolean): void
   setPairingInfo(value: { address: string; code: string }): void
+  setResetForecast(value: ResetForecast): void
 }
 
 export function mountDetailsPanel(
@@ -112,11 +143,13 @@ export function mountDetailsPanel(
   onTogglePairing?: () => void,
   onResetPairing?: () => void,
   onApproval?: (taskId: string, decision: ApprovalDecision) => void,
+  resetForecast: ResetForecast = { status: 'loading', sourceUrl: RESET_FORECAST_SOURCE_URL },
 ): MountedDetailsView {
   root.innerHTML = `<section class="details-panel" aria-label="额度详情">
     <header class="details-drag-region" data-tauri-drag-region><div data-tauri-drag-region><small data-tauri-drag-region>CODEX 额度状态</small><h1 class="details-title" data-tauri-drag-region></h1><small class="weekly-quota-note" data-tauri-drag-region></small></div><button class="close-button pairing-settings-button" type="button" aria-label="配对设置"></button></header>
     <div class="detail-grid"><div><small class="reset-label">下次重置</small><strong class="reset-value"></strong></div><div><small>当前套餐</small><strong class="plan-value"></strong></div><div><small>可用重置机会</small><strong class="credits-value"></strong></div><div><small class="token-detail-label"></small><strong class="tokens-value"></strong></div></div>
     <div class="freshness"></div>
+    <section class="reset-forecast-card" aria-label="Codex 重置预测"></section>
     <div class="history-card" aria-label="近期趋势"><div class="history-head"><strong>近期趋势</strong><div class="history-head-actions"><small class="history-window"></small><button class="history-toggle" type="button" hidden></button></div></div><div class="history-content"></div></div>
     <div class="pairing-settings" aria-label="配对设置" hidden></div>
     <div class="task-header"><strong>任务状态</strong><span class="task-count"></span></div><ul class="task-list"></ul>
@@ -133,6 +166,7 @@ export function mountDetailsPanel(
   const tokenDetailLabel = root.querySelector<HTMLElement>('.token-detail-label')!
   const tokensValue = root.querySelector<HTMLElement>('.tokens-value')!
   const freshness = root.querySelector<HTMLElement>('.freshness')!
+  const resetForecastCard = root.querySelector<HTMLElement>('.reset-forecast-card')!
   const historyWindow = root.querySelector<HTMLElement>('.history-window')!
   const historyToggle = root.querySelector<HTMLButtonElement>('.history-toggle')!
   const historyContent = root.querySelector<HTMLElement>('.history-content')!
@@ -147,6 +181,7 @@ export function mountDetailsPanel(
   let currentPairingInfo = pairingInfo
   let historySnapshot: Snapshot | undefined
   let historyView: HistoryView = 'current'
+  let currentResetForecast = resetForecast
 
   pairingButton.addEventListener('click', () => onTogglePairing?.())
   historyToggle.addEventListener('click', () => {
@@ -174,6 +209,7 @@ export function mountDetailsPanel(
       : ''
   }
   updatePairing()
+  renderResetForecast(resetForecastCard, currentResetForecast)
   pairingSettings.addEventListener('click', (event) => {
     if ((event.target as HTMLElement).closest('.pairing-reset-button')) onResetPairing?.()
   })
@@ -197,6 +233,7 @@ export function mountDetailsPanel(
         : snapshot.status === 'stale'
           ? `${snapshot.error ?? '数据已过期'} · 正在重连 · 保留最后成功数据 · 最后成功于 ${formatRecentTime(snapshot.fetchedAt)}${source ? ` · ${source}` : ''}`
           : `${snapshot.error ?? '暂时无法读取数据'} · 保留最后成功数据 · 最后成功于 ${formatRecentTime(snapshot.fetchedAt)}`
+      renderResetForecast(resetForecastCard, currentResetForecast)
       const signature = taskSignature(snapshot)
       if (signature !== lastTaskSignature) {
         renderTaskList(taskList, snapshot.tasks, onAcknowledge, onApproval)
@@ -222,12 +259,16 @@ export function mountDetailsPanel(
       currentPairingInfo = value
       updatePairing()
     },
+    setResetForecast(value) {
+      currentResetForecast = value
+      renderResetForecast(resetForecastCard, value)
+    },
     destroy() { root.replaceChildren() },
   }
 }
 
-export function renderDetailsPanel(root: HTMLElement, snapshot: Snapshot, onRefresh: () => void, onAcknowledge: (taskId: string) => void, onClose: () => void, pairingInfo?: { address: string; code: string }, isRefreshing = false, onAdvance?: () => void, pairingSettingsOpen = false, onTogglePairing?: () => void, onResetPairing?: () => void, onApproval?: (taskId: string, decision: ApprovalDecision) => void): void {
-  const mounted = mountDetailsPanel(root, onRefresh, onAcknowledge, onClose, pairingInfo, onAdvance, pairingSettingsOpen, onTogglePairing, onResetPairing, onApproval)
+export function renderDetailsPanel(root: HTMLElement, snapshot: Snapshot, onRefresh: () => void, onAcknowledge: (taskId: string) => void, onClose: () => void, pairingInfo?: { address: string; code: string }, isRefreshing = false, onAdvance?: () => void, pairingSettingsOpen = false, onTogglePairing?: () => void, onResetPairing?: () => void, onApproval?: (taskId: string, decision: ApprovalDecision) => void, resetForecast?: ResetForecast): void {
+  const mounted = mountDetailsPanel(root, onRefresh, onAcknowledge, onClose, pairingInfo, onAdvance, pairingSettingsOpen, onTogglePairing, onResetPairing, onApproval, resetForecast)
   mounted.update(snapshot)
   mounted.setRefreshing(isRefreshing)
 }
