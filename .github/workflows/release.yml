@@ -78,7 +78,10 @@ jobs:
             platforms = [ordered]@{
               "windows-x86_64" = [ordered]@{
                 signature = $signature
-                url = $installer.browserDownloadUrl
+                # gh release view exposes the public download URL as `url`.
+                # `browserDownloadUrl` is not a valid asset field and would
+                # silently publish a null updater URL.
+                url = $installer.url
               }
             }
           }
