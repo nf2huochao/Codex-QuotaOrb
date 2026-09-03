@@ -41,7 +41,7 @@ test('top pull shows the hint and refreshes once after the threshold', async ({ 
   await expect(page.locator('#pull-refresh')).toBeVisible()
   await expect(page.locator('#pull-refresh')).toContainText('松开刷新')
   await dispatchTouch(page, 'touchend', 160)
-  await expect(page.locator('#pull-refresh')).toContainText('正在刷新')
+  await expect(page.locator('#pull-refresh')).toContainText('正在更新')
   await expect.poll(() => snapshotCalls).toBe(callsBeforePull + 1)
   await expect(page.locator('#pull-refresh')).toContainText('已更新 ·')
   await expect(page.locator('.fresh')).toContainText('指标轮询')
