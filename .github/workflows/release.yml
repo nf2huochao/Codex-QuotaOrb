@@ -59,3 +59,28 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+      - name: Publish updater manifest
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $signatureFile = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe.sig" | Select-Object -First 1
+          if ($null -eq $signatureFile) { throw "Updater signature was not generated." }
+          $signature = (Get-Content -Raw $signatureFile.FullName).Trim()
+          $release = gh release view $tag --json assets | ConvertFrom-Json
+          $installer = $release.assets | Where-Object { $_.name -like "*-setup.exe" } | Select-Object -First 1
+          if ($null -eq $installer) { throw "Windows installer asset was not found in release $tag." }
+          $manifest = [ordered]@{
+            version = "${{ github.ref_name }}" -replace '^v', ''
+            notes = "Codex QuotaOrb $tag"
+            pub_date = (Get-Date).ToUniversalTime().ToString("o")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $signature
+                url = $installer.browserDownloadUrl
+              }
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath latest.json -Encoding utf8NoBOM
+          gh release upload $tag latest.json --clobber
