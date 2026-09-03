@@ -117,7 +117,7 @@ function renderHistory(root: HTMLElement, snapshot: Snapshot, view: HistoryView,
   const nowAt = Date.now()
   for (let index = 0; index < HISTORY_DAYS * HOURS_PER_DAY; index += 1) {
     const cellDate = new Date(cycleStart.getTime() + index * 3600 * 1000)
-    const label = `${cellDate.getMonth() + 1}/${cellDate.getDate()} ${String(cellDate.getHours()).padStart(2, '0')}:00`
+    const label = `${cellDate.getMonth() + 1}-${cellDate.getDate()} ${String(cellDate.getHours()).padStart(2, '0')}:00`
     const point = points.get(historyHourKey(cellDate))
     const future = cellDate.getTime() > nowAt
     if (point && index === 0 && view === 'current') {
@@ -171,8 +171,8 @@ function renderHistory(root: HTMLElement, snapshot: Snapshot, view: HistoryView,
     return point ? `<text class="history-day-label" x="${(x(index) + 5).toFixed(2)}" y="${height - 5}">${escapeHtml(point.label.split(' ')[0])}</text>` : ''
   }).join('')
   const hoverPoints = chartPoints.map((point, index) => point.quota === undefined
-    ? `<circle class="history-hover-point is-empty" cx="${x(index).toFixed(2)}" cy="${plotBottom}" r="7"><title>${escapeHtml(point.label)} · ${t('noSample', language)}</title></circle>`
-    : `<circle class="history-hover-point${point.inferred ? ' is-inferred' : ''}${point.future ? ' is-future' : ''}" cx="${x(index).toFixed(2)}" cy="${y(point.quota).toFixed(2)}" r="7"><title>${escapeHtml(point.label)} · ${t('weeklyPrefix', language)} ${point.quota}%${point.inferred ? ` · ${t('carriedSample', language)}` : ''}</title></circle>`).join('')
+    ? `<circle class="history-hover-point is-empty" cx="${x(index).toFixed(2)}" cy="${plotBottom}" r="3"><title>${escapeHtml(point.label)} · ${t('noSample', language)}</title></circle>`
+    : `<circle class="history-hover-point${point.inferred ? ' is-inferred' : ''}${point.future ? ' is-future' : ''}" cx="${x(index).toFixed(2)}" cy="${y(point.quota).toFixed(2)}" r="${point.future ? 3 : 7}"><title>${escapeHtml(point.label)} · ${t('weeklyPrefix', language)} ${point.quota}%${point.inferred ? ` · ${t('carriedSample', language)}` : ''}</title></circle>`).join('')
   const sampledPoints = chartPoints.map((point, index) => point.quota === undefined || point.inferred ? '' : `<circle class="history-sample-point" cx="${x(index).toFixed(2)}" cy="${y(point.quota).toFixed(2)}" r="2.8" aria-hidden="true" />`).join('')
   const paths = lineSegments.map(({ path, future }) => `<path class="history-line${future ? ' is-future' : ''}" d="${path}" />`).join('')
   root.innerHTML = `<div class="history-summary"><span>${t('weeklyPrefix', language)} ${summaryStart ?? '--'}% → ${last ?? '--'}%</span><span>${summaryLabel}</span></div><div class="history-chart-wrap"><svg class="history-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${cycleLabel} ${t('weeklyQuotaTrend', language)}"><line class="history-baseline" x1="0" y1="${plotBottom}" x2="${width}" y2="${plotBottom}" />${dividers}<g class="history-day-labels">${dayLabels}</g><g class="history-lines">${paths}</g><g class="history-points">${sampledPoints}${hoverPoints}</g></svg></div>`

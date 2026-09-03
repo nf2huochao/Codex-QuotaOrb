@@ -137,7 +137,7 @@ const COPY: Record<Language, Copy> = {
     quotaDetails: 'Quota details',
     weeklyRemaining: 'Weekly remaining',
     weeklyShort: 'Weekly',
-    fiveHourRemaining: '5-hour quota remaining',
+    fiveHourRemaining: '5-hour remaining',
     fiveHourQuota: '5-hour quota',
     quotaAvailable: 'Quota available',
     dataPending: 'Data pending',
