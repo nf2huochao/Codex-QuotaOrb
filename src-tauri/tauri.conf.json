@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Codex \u989d\u5ea6\u60ac\u6d6e\u7a97",
   "mainBinaryName": "CodexQuotaWindow",
-  "version": "0.1.9",
+  "version": "1.0.0",
   "identifier": "com.codex.quota-floating-window",
   "build": {
     "frontendDist": "../dist",

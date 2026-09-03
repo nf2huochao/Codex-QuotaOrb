@@ -4,7 +4,7 @@ const RESET_FORECAST_ENDPOINT = 'https://codex.lunarwerx.com/cnx/aireset/summary
 const REQUEST_TIMEOUT_MS = 20_000
 
 export interface ResetForecast {
-  status: 'loading' | 'fresh' | 'error'
+  status: 'loading' | 'fresh' | 'stale' | 'error'
   sourceUrl: string
   fetchedAt?: number
   probability24h?: number
@@ -14,6 +14,8 @@ export interface ResetForecast {
   lastResetAt?: string
   error?: string
 }
+
+export const RESET_FORECAST_STALE_AFTER_MS = 30 * 60 * 1000
 
 function finite(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined

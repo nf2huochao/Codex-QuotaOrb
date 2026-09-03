@@ -13,7 +13,7 @@ const STARTUP_APPROVED_KEY: &str =
     "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
 
 #[cfg(windows)]
-fn autostart_is_enabled(app: &AppHandle) -> bool {
+pub(crate) fn autostart_is_enabled(app: &AppHandle) -> bool {
     use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
     let name = app.package_info().name.as_str();
@@ -39,12 +39,12 @@ fn autostart_is_enabled(app: &AppHandle) -> bool {
 }
 
 #[cfg(not(windows))]
-fn autostart_is_enabled(app: &AppHandle) -> bool {
+pub(crate) fn autostart_is_enabled(app: &AppHandle) -> bool {
     app.autolaunch().is_enabled().unwrap_or(false)
 }
 
 #[cfg(windows)]
-fn set_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
+pub(crate) fn set_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     use std::env::current_exe;
     use winreg::enums::RegType::REG_BINARY;
     use winreg::{
@@ -86,7 +86,7 @@ fn set_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn set_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
+pub(crate) fn set_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     let result = if enabled {
         app.autolaunch().enable()
     } else {

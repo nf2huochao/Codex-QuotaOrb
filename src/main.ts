@@ -4,10 +4,14 @@ import { listen } from '@tauri-apps/api/event'
 import { diffSnapshot, normalizeSnapshot, Snapshot } from './domain'
 import { mountDetailsPanel, MountedDetailsView } from './components/DetailsPanel'
 import { mountFloatingBall, mountFloatingIsland, MountedView } from './components/FloatingIsland'
+import { mountSettingsPanel, MountedSettingsView } from './components/SettingsPanel'
 import { fetchResetForecast, ResetForecast, RESET_FORECAST_SOURCE_URL } from './resetForecast'
+import { getLanguage, LANGUAGE_EVENT, t } from './i18n'
+import { applyStoredTheme } from './theme'
 
 const app = document.querySelector<HTMLMainElement>('#app')
 if (!app) throw new Error('app root is missing')
+applyStoredTheme()
 
 const designPreview = new URLSearchParams(window.location.search).has('design-preview')
 const previewNow = Math.floor(Date.now() / 1000)
@@ -19,7 +23,7 @@ const fallback: Snapshot = designPreview
   ? { status: 'fresh', fetchedAt: previewNow, quotaRemainingPercent: 81, fiveHourRemainingPercent: 67, quotaResetsAt: previewNow + 3 * 3600, fiveHourResetsAt: previewNow + 2 * 3600, plan: 'Plus', resetCredits: 0, todayTokens: 54030000, tasks: [], taskCounts: { none: 0, needsAction: 0, running: 0, completed: 0 }, activeTaskCount: 0, history: previewHistory, historyCycleKey: previewNow + 3 * 3600, previousHistory: [], schemaVersion: '1.0' }
   : { status: 'stale', tasks: [], taskCounts: { none: 0, needsAction: 0, running: 0, completed: 0 }, activeTaskCount: 0, history: [], previousHistory: [], schemaVersion: '1.0', error: '等待连接 Codex app-server' }
 let snapshot = fallback
-type ViewState = 'ball' | 'summary' | 'details'
+type ViewState = 'ball' | 'summary' | 'details' | 'settings'
 let viewState: ViewState = 'ball'
 let refreshing = false
 let pairingInfo: { address: string; code: string } | undefined
@@ -31,16 +35,19 @@ let pairingSettingsOpen = false
 let ballView: MountedView | undefined
 let islandView: MountedView | undefined
 let detailsView: MountedDetailsView | undefined
+let settingsView: MountedSettingsView | undefined
 let resetForecast: ResetForecast = { status: 'loading', sourceUrl: RESET_FORECAST_SOURCE_URL }
 let snapshotQueue: Snapshot | undefined
 let snapshotQueueTimer: number | undefined
 let lastChangedAt = snapshot.changedAt ?? 0
 const REFRESH_TIMEOUT_MS = 35_000
+const ALWAYS_ON_TOP_STORAGE_KEY = 'codex-always-on-top'
 
-app.innerHTML = '<div class="app-frame"><div id="ball-root"></div><div id="island-root" hidden></div><div id="details-root" hidden></div></div>'
+app.innerHTML = '<div class="app-frame"><div id="ball-root"></div><div id="island-root" hidden></div><div id="details-root" hidden></div><div id="settings-root" hidden></div></div>'
 const ballRoot = document.querySelector<HTMLElement>('#ball-root')!
 const islandRoot = document.querySelector<HTMLElement>('#island-root')!
 const detailsRoot = document.querySelector<HTMLElement>('#details-root')!
+const settingsRoot = document.querySelector<HTMLElement>('#settings-root')!
 
 function resizeWindow(width: number, height: number, expanded: boolean) {
   if (designPreview) return
@@ -51,7 +58,7 @@ function resizeWindow(width: number, height: number, expanded: boolean) {
 }
 
 function activeView(): MountedView | undefined {
-  return viewState === 'ball' ? ballView : viewState === 'summary' ? islandView : detailsView
+  return viewState === 'ball' ? ballView : viewState === 'summary' ? islandView : viewState === 'details' ? detailsView : settingsView
 }
 
 function updateMountedSnapshot() {
@@ -73,6 +80,60 @@ function scheduleDetailsResize() {
   })
 }
 
+function scheduleSettingsResize() {
+  if (viewState !== 'settings') return
+  window.requestAnimationFrame(() => {
+    const panel = settingsRoot.querySelector<HTMLElement>('.settings-panel')
+    if (panel) resizeWindow(620, Math.min(Math.ceil(panel.scrollHeight + 32), 900), true)
+  })
+}
+
+async function getAutostartSetting() {
+  if (designPreview) return false
+  return invoke<boolean>('get_autostart')
+}
+
+async function setAutostartSetting(enabled: boolean) {
+  if (designPreview) return
+  try { await invoke('set_autostart', { enabled }) } catch (error) {
+    window.alert(`${t('autostartFailed')}：${error instanceof Error ? error.message : String(error)}`)
+    throw error
+  }
+}
+
+async function getAlwaysOnTopSetting() {
+  if (designPreview) return true
+  const saved = window.localStorage.getItem(ALWAYS_ON_TOP_STORAGE_KEY)
+  if (saved !== null) return saved === 'true'
+  return invoke<boolean>('get_always_on_top')
+}
+
+async function setAlwaysOnTopSetting(enabled: boolean) {
+  if (designPreview) return
+  try { await invoke('set_always_on_top', { enabled }) } catch (error) {
+    window.alert(`${t('alwaysOnTop')}：${error instanceof Error ? error.message : String(error)}`)
+    throw error
+  }
+  window.localStorage.setItem(ALWAYS_ON_TOP_STORAGE_KEY, String(enabled))
+}
+
+function restoreAlwaysOnTopSetting() {
+  if (designPreview) return
+  const saved = window.localStorage.getItem(ALWAYS_ON_TOP_STORAGE_KEY)
+  if (saved !== null) void invoke('set_always_on_top', { enabled: saved === 'true' }).catch(() => undefined)
+}
+
+async function runUpdateCheck() {
+  try {
+    const result = await invoke<{ message: string; available: boolean }>('check_for_updates')
+    window.alert(result.message)
+    if (result.available) await invoke('relaunch_app')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    window.alert(`${t('updateCheckFailed')}：${message}`)
+  }
+}
+
 function renderView() {
   const entering = renderedViewState !== viewState
   app.dataset.transition = entering ? 'enter' : 'update'
@@ -81,6 +142,7 @@ function renderView() {
     ballRoot.hidden = true
     islandRoot.hidden = true
     detailsRoot.hidden = false
+    settingsRoot.hidden = true
     if (!detailsView) {
         detailsView = mountDetailsPanel(detailsRoot, refresh, acknowledge, () => { viewState = 'summary'; renderView() }, pairingInfo, () => { viewState = 'ball'; renderView() }, pairingSettingsOpen, () => {
         pairingSettingsOpen = !pairingSettingsOpen
@@ -98,16 +160,32 @@ function renderView() {
         } catch (error) {
           applySnapshot({ ...snapshot, status: 'error', error: error instanceof Error ? error.message : '批准请求处理失败' })
         }
-      }, resetForecast)
+      }, async () => await refresh(), resetForecast, () => { viewState = 'settings'; renderView() })
     }
     detailsView.update(snapshot)
     detailsView.setResetForecast(resetForecast)
     detailsView.setRefreshing(refreshing)
     if (entering) scheduleDetailsResize()
+  } else if (viewState === 'settings') {
+    ballRoot.hidden = true
+    islandRoot.hidden = true
+    detailsRoot.hidden = true
+    settingsRoot.hidden = false
+    if (!settingsView) settingsView = mountSettingsPanel(settingsRoot, {
+      onClose: () => { viewState = 'details'; renderView() },
+      onCheckUpdates: runUpdateCheck,
+      getAutostart: getAutostartSetting,
+      setAutostart: setAutostartSetting,
+      getAlwaysOnTop: getAlwaysOnTopSetting,
+      setAlwaysOnTop: setAlwaysOnTopSetting,
+    })
+    settingsView.setLanguage(getLanguage())
+    scheduleSettingsResize()
   } else if (viewState === 'summary') {
     ballRoot.hidden = true
     islandRoot.hidden = false
     detailsRoot.hidden = true
+    settingsRoot.hidden = true
     if (!islandView) islandView = mountFloatingIsland(islandRoot, () => { viewState = 'details'; renderView() })
     islandView.update(snapshot)
     if (entering) resizeWindow(520, 120, false)
@@ -115,6 +193,7 @@ function renderView() {
     ballRoot.hidden = false
     islandRoot.hidden = true
     detailsRoot.hidden = true
+    settingsRoot.hidden = true
     if (!ballView) ballView = mountFloatingBall(ballRoot, () => { viewState = 'summary'; renderView() })
     ballView.update(snapshot)
     if (entering) resizeWindow(116, 116, false)
@@ -143,8 +222,8 @@ function queueSnapshot(input: unknown) {
   }, 150)
 }
 
-async function refresh() {
-  if (designPreview || refreshing) return
+async function refresh(): Promise<boolean> {
+  if (designPreview || refreshing) return false
   refreshing = true
   activeView()?.setRefreshing(true)
   if (!pairingInfo) {
@@ -170,6 +249,7 @@ async function refresh() {
   }
   refreshing = false
   activeView()?.setRefreshing(false)
+  return snapshot.status === 'fresh'
 }
 
 async function acknowledge(taskId: string) {
@@ -178,6 +258,14 @@ async function acknowledge(taskId: string) {
     if (task) applySnapshot({ ...snapshot, tasks: snapshot.tasks.map((item) => item.id === taskId ? { ...item, acknowledged: true } : item) })
   }
 }
+
+window.addEventListener(LANGUAGE_EVENT, () => {
+  const language = getLanguage()
+  ballView?.setLanguage(language)
+  islandView?.setLanguage(language)
+  detailsView?.setLanguage(language)
+  settingsView?.setLanguage(language)
+})
 
 async function refreshResetForecast() {
   resetForecast = await fetchResetForecast()
@@ -189,23 +277,17 @@ async function refreshResetForecast() {
 ;(window as Window & { __codexTestApplySnapshot?: (value: unknown) => void }).__codexTestApplySnapshot = queueSnapshot
 
 renderView()
+restoreAlwaysOnTopSetting()
 void refreshResetForecast()
 if (!designPreview) {
   void refresh()
   void listen<Snapshot>('snapshot-updated', (event) => queueSnapshot(event.payload))
   void listen('refresh-requested', () => { void refresh() })
   void listen<string>('autostart-error', (event) => {
-    window.alert(`开机自启设置失败：${event.payload}`)
+    window.alert(`${t('autostartFailed')}：${event.payload}`)
   })
   void listen('update-check-requested', async () => {
-    try {
-      const result = await invoke<{ message: string; available: boolean }>('check_for_updates')
-      window.alert(result.message)
-      if (result.available) await invoke('relaunch_app')
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      window.alert(`检查更新失败：${message}`)
-    }
+    await runUpdateCheck()
   })
   window.setInterval(refresh, 120_000)
   window.setInterval(() => { void refreshResetForecast() }, 300_000)

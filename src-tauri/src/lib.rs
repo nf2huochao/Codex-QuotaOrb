@@ -40,12 +40,26 @@ struct UpdateStatus {
 async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateStatus, String> {
     #[cfg(desktop)]
     {
-        let update = app
+        let updater = app
             .updater()
-            .map_err(|error| format!("更新服务初始化失败：{error}"))?
-            .check()
-            .await
-            .map_err(|error| format!("检查更新失败：{error}"))?;
+            .map_err(|error| format!("更新服务初始化失败：{error}"))?;
+        let update = match updater.check().await {
+            Ok(update) => update,
+            Err(error) => {
+                // GitHub Releases may exist before its signed updater artifacts are
+                // uploaded. Report that state explicitly instead of showing the
+                // misleading generic "error sending request" message.
+                let detail = error.to_string();
+                return Ok(UpdateStatus {
+                    current_version: env!("CARGO_PKG_VERSION").into(),
+                    available: false,
+                    latest_version: None,
+                    message: format!(
+                        "GitHub 更新源暂不可用：发行版需要同时提供 latest.json 和签名文件（{detail}）"
+                    ),
+                });
+            }
+        };
         if let Some(update) = update {
             let latest_version = update.version.clone();
             update
@@ -179,6 +193,26 @@ fn set_window_expanded(
         .set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }))
         .map_err(|error| error.to_string())
 }
+
+#[tauri::command]
+fn get_autostart(app: tauri::AppHandle) -> bool {
+    tray::autostart_is_enabled(&app)
+}
+
+#[tauri::command]
+fn set_autostart(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
+    tray::set_autostart(&app, enabled)
+}
+
+#[tauri::command]
+fn get_always_on_top(window: tauri::Window) -> Result<bool, String> {
+    window.is_always_on_top().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_always_on_top(enabled: bool, window: tauri::Window) -> Result<(), String> {
+    window.set_always_on_top(enabled).map_err(|error| error.to_string())
+}
 #[cfg(test)]
 mod codex_client_tests;
 
@@ -224,7 +258,11 @@ pub fn run() {
             refresh_now,
             acknowledge_task,
             respond_to_approval,
-            set_window_expanded
+            set_window_expanded,
+            get_autostart,
+            set_autostart,
+            get_always_on_top,
+            set_always_on_top
         ])
         .setup(move |app| {
             tray::setup_tray(app.handle())?;

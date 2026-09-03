@@ -4,6 +4,26 @@ All notable changes to Codex QuotaOrb are documented here in Chinese and English
 
 Codex 额度悬浮窗的主要新增、改进和修复均在此以中英文记录。
 
+## v1.0.0 — 2026-09-03
+
+### Added / 新增
+
+- Published the first 1.0.0 release with signed Windows updater artifacts (`latest.json` and `.sig`). / 发布首个 1.0.0 版本，并提供签名 Windows 更新文件（`latest.json` 和 `.sig`）。
+- Added bilingual interface switching, coordinated themes, settings controls, and low-frequency change hints. / 增加中英文界面切换、协调主题、设置项和低频变化提醒。
+
+### Improved / 改进
+
+- Recent trend now follows the reset cycle, keeps a complete seven-day timeline, and distinguishes sampled, carried-forward, and future values with restrained colors. / 近期趋势按重置周期计算，保留完整 7 天时间轴，并用克制的颜色区分采样、顺延和未来数据。
+- Added update-data feedback, pairing copy/retest actions, and a compact reset forecast panel for desktop and LAN web views. / 增加更新数据反馈、配对码复制与连接重测，并在桌面端和局域网网页端提供紧凑的重置预测专栏。
+
+### Scope / 范围
+
+- Task status, Token, plan, weekly quota, pairing data model, and reset-credit logic remain unchanged. / 任务状态、Token、套餐、周额度、配对数据模型和可用重置机会逻辑保持不变。
+
+### Release notes / 发行说明
+
+- Windows x64 installer and signed updater files are published on [GitHub Releases](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.0). / Windows x64 安装包和签名更新文件发布在 [GitHub Releases](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.0)。
+
 ## v0.1.9 — 2026-09-01
 
 ### Added / 新增

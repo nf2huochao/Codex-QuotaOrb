@@ -87,7 +87,14 @@ This project is released under the [MIT License](LICENSE). You may use, modify, 
 
 ## 当前更新状态 / Current release status
 
-**v0.1.9 — 2026-09-01 — 最新稳定测试版 / latest stable test release**
+**v1.0.0 — 2026-09-03 — 最新稳定版 / latest stable release**
+
+- 首个 1.0.0 正式版本，包含中英文界面切换、协调主题、更新数据反馈、配对辅助和按重置周期计算的近期趋势。 The first 1.0.0 release adds bilingual UI, coordinated themes, update feedback, pairing helpers, and reset-cycle-based recent trends.
+- 近期趋势固定显示最近 7 天 × 24 小时的一行细柱，共 168 个位置；真实采样用橙色，顺延数据用草绿色，尚未到达的未来时间用灰色。 The recent trend keeps 168 hourly positions with orange sampled values, green carried-forward values, and gray future hours.
+- 更新器发布文件包含 `latest.json` 与对应 `.sig` 签名，桌面端可从 GitHub Releases 检查并下载更新。 Signed `latest.json` and `.sig` updater artifacts are published for desktop update checks.
+- [下载 v1.0.0 Windows x64 安装包](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.0) · [查看 GitHub 发行版](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.0)。
+
+**Previous stable test release: v0.1.9 — 2026-09-01**
 
 - 新增“Codex 重置预测”专栏，桌面详情页和手机局域网网页均显示 24 小时重置概率、距上次重置时间、近 30 天重置次数、平均等待时间和最近重置时间，并标注 LunarWerx 来源与“查看证据”链接。
 - 近期趋势固定显示最近 7 天 × 24 小时的一行细柱，共 168 个位置；真实采样用橙色，推算或沿用数据用低饱和绿色，桌面端和手机网页端都不再出现原生滑轨。
