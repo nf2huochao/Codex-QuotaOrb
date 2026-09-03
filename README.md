@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">Download for Windows</a> ·
-  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.0">v1.0.0 release</a> ·
+  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.1">v1.0.1 release</a> ·
   <a href="LICENSE">MIT License</a>
 </p>
 
@@ -106,7 +106,7 @@ Windows releases are built by GitHub Actions and publish a signed installer, `la
 3. Start Codex, then start Codex QuotaOrb.
 4. Open **Pair** in the details page, scan or copy the LAN address, and enter the four-digit code on a phone connected to the same Wi‑Fi.
 
-The current stable release is [v1.0.0](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.0). Older releases remain available and are not overwritten.
+The current stable release is [v1.0.1](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.1). Older releases remain available and are not overwritten.
 
 ## How it works
 

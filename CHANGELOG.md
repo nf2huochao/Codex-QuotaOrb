@@ -4,6 +4,17 @@ All notable changes to Codex QuotaOrb are documented here in Chinese and English
 
 Codex 额度悬浮窗的主要新增、改进和修复均在此以中英文记录。
 
+## v1.0.1 — 2026-09-04
+
+### Fixed / 修复
+
+- Published a versioned Windows installer and updater manifest so existing v1.0.0 installations can update normally. / 发布带新版本号的 Windows 安装包和更新清单，使现有 v1.0.0 安装可以正常更新。
+- Corrected the updater manifest download URL field for future releases. / 修正后续发行版更新清单中的安装包下载地址字段。
+
+### Release notes / 发行说明
+
+- Windows x64 installer and signed updater files are published on [GitHub Releases](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.1). / Windows x64 安装包和签名更新文件发布在 [GitHub Releases](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.1)。
+
 ## v1.0.0 — 2026-09-03
 
 ### Added / 新增

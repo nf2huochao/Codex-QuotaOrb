@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">下载 Windows 版</a> ·
-  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.0">v1.0.0 发行版</a> ·
+  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.1">v1.0.1 发行版</a> ·
   <a href="LICENSE">MIT 许可证</a>
 </p>
 
@@ -106,7 +106,7 @@ Windows 发行流程由 GitHub Actions 构建，并发布签名安装包、`late
 3. 启动 Codex，再启动 Codex 额度悬浮窗。
 4. 在详情页打开“配对”，复制或扫描局域网地址，在同一 Wi‑Fi 的手机上输入四位配对码。
 
-当前稳定版是 [v1.0.0](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.0)，旧版本仍保留，不会被覆盖。
+当前稳定版是 [v1.0.1](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.1)，旧版本仍保留，不会被覆盖。
 
 ## 工作方式
 
