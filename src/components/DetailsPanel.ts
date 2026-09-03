@@ -143,39 +143,47 @@ function renderHistory(root: HTMLElement, snapshot: Snapshot, view: HistoryView,
   const plotBottom = 126
   const x = (index: number) => (index / (chartPoints.length - 1)) * width
   const y = (quota: number) => plotBottom - (Math.max(0, Math.min(100, quota)) / 100) * (plotBottom - plotTop)
-  const lineSegments: Array<{ path: string; future: boolean }> = []
-  let segment: string[] = []
-  let segmentFuture = false
-  const flushSegment = () => {
-    if (segment.length > 1) lineSegments.push({ path: segment.join(' '), future: segmentFuture })
-    segment = []
-  }
-  chartPoints.forEach((point, index) => {
-    if (point.quota === undefined) {
-      flushSegment()
-      return
-    }
-    const future = point.future === true
-    if (segment.length && future !== segmentFuture) flushSegment()
-    segmentFuture = future
-    segment.push(`${segment.length ? 'L' : 'M'} ${x(index).toFixed(2)} ${y(point.quota).toFixed(2)}`)
+  let lastQuota = 100
+  const visualQuotas = chartPoints.map((point) => {
+    const quota = point.quota === undefined ? lastQuota : point.quota
+    if (point.quota !== undefined) lastQuota = point.quota
+    return quota
   })
-  flushSegment()
+  const linePoints = chartPoints.map((point, index) => point.quota !== undefined && !point.future ? { x: x(index), y: y(visualQuotas[index]) } : undefined).filter((point): point is { x: number; y: number } => Boolean(point))
+  const smoothPath = (points: Array<{ x: number; y: number }>) => {
+    if (!points.length) return ''
+    if (points.length === 1) return `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`
+    let path = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`
+    for (let index = 0; index < points.length - 1; index += 1) {
+      const p0 = points[index - 1] ?? points[index]
+      const p1 = points[index]
+      const p2 = points[index + 1]
+      const p3 = points[index + 2] ?? p2
+      const c1 = { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 }
+      const c2 = { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 }
+      path += ` C ${c1.x.toFixed(2)} ${c1.y.toFixed(2)}, ${c2.x.toFixed(2)} ${c2.y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`
+    }
+    return path
+  }
   const dividers = Array.from({ length: HISTORY_DAYS + 1 }, (_, day) => {
     const index = Math.min(chartPoints.length - 1, day * HOURS_PER_DAY)
     return `<line class="history-day-divider" x1="${x(index).toFixed(2)}" y1="${plotTop}" x2="${x(index).toFixed(2)}" y2="${plotBottom}" />`
   }).join('')
   const dayLabels = Array.from({ length: HISTORY_DAYS }, (_, day) => {
-    const index = day * HOURS_PER_DAY
-    const point = chartPoints[index]
-    return point ? `<text class="history-day-label" x="${(x(index) + 5).toFixed(2)}" y="${height - 5}">${escapeHtml(point.label.split(' ')[0])}</text>` : ''
+    const startIndex = day * HOURS_PER_DAY
+    const endIndex = Math.min(chartPoints.length - 1, (day + 1) * HOURS_PER_DAY)
+    const labelIndex = (startIndex + endIndex) / 2
+    const point = chartPoints[startIndex]
+    return point ? `<text class="history-day-label" x="${x(labelIndex).toFixed(2)}" y="${height - 5}" text-anchor="middle">${escapeHtml(point.label.split(' ')[0].replace('-', ' - '))}</text>` : ''
   }).join('')
-  const hoverPoints = chartPoints.map((point, index) => point.quota === undefined
-    ? `<circle class="history-hover-point is-empty" cx="${x(index).toFixed(2)}" cy="${plotBottom}" r="3"><title>${escapeHtml(point.label)} · ${t('noSample', language)}</title></circle>`
-    : `<circle class="history-hover-point${point.inferred ? ' is-inferred' : ''}${point.future ? ' is-future' : ''}" cx="${x(index).toFixed(2)}" cy="${y(point.quota).toFixed(2)}" r="${point.future ? 3 : 7}"><title>${escapeHtml(point.label)} · ${t('weeklyPrefix', language)} ${point.quota}%${point.inferred ? ` · ${t('carriedSample', language)}` : ''}</title></circle>`).join('')
-  const sampledPoints = chartPoints.map((point, index) => point.quota === undefined || point.inferred ? '' : `<circle class="history-sample-point" cx="${x(index).toFixed(2)}" cy="${y(point.quota).toFixed(2)}" r="2.8" aria-hidden="true" />`).join('')
-  const paths = lineSegments.map(({ path, future }) => `<path class="history-line${future ? ' is-future' : ''}" d="${path}" />`).join('')
-  root.innerHTML = `<div class="history-summary"><span>${t('weeklyPrefix', language)} ${summaryStart ?? '--'}% → ${last ?? '--'}%</span><span>${summaryLabel}</span></div><div class="history-chart-wrap"><svg class="history-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${cycleLabel} ${t('weeklyQuotaTrend', language)}"><line class="history-baseline" x1="0" y1="${plotBottom}" x2="${width}" y2="${plotBottom}" />${dividers}<g class="history-day-labels">${dayLabels}</g><g class="history-lines">${paths}</g><g class="history-points">${sampledPoints}${hoverPoints}</g></svg></div>`
+  const slotWidth = width / chartPoints.length
+  const hoverSlots = chartPoints.map((point, index) => {
+    const title = point.quota === undefined
+      ? `${escapeHtml(point.label)} · ${t('noSample', language)}`
+      : `${escapeHtml(point.label)} · ${t('weeklyPrefix', language)} ${point.quota}%${point.inferred ? ` · ${t('carriedSample', language)}` : ''}`
+    return `<rect class="history-hover-slot" x="${Math.max(0, x(index) - slotWidth / 2).toFixed(2)}" y="${plotTop}" width="${slotWidth.toFixed(2)}" height="${(plotBottom - plotTop).toFixed(2)}" aria-label="${title}"><title>${title}</title></rect>`
+  }).join('')
+  root.innerHTML = `<div class="history-summary"><span>${t('weeklyPrefix', language)} ${summaryStart ?? '--'}% → ${last ?? '--'}%</span><span>${summaryLabel}</span></div><div class="history-chart-wrap"><svg class="history-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${cycleLabel} ${t('weeklyQuotaTrend', language)}"><line class="history-baseline" x1="0" y1="${plotBottom}" x2="${width}" y2="${plotBottom}" />${dividers}<g class="history-day-labels">${dayLabels}</g><g class="history-lines"><path class="history-line" d="${smoothPath(linePoints)}" /></g><g class="history-hover-slots">${hoverSlots}</g></svg></div>`
 }
 
 function renderTaskCounts(root: HTMLElement, snapshot: Snapshot, language: Language = getLanguage()) {

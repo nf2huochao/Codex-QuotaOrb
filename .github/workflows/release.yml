@@ -49,10 +49,11 @@ jobs:
           releaseBody: |
             ## 本次更新 / Release notes
 
-            - 新增“Codex 重置预测”专栏，显示未来 24 小时重置概率、距上次重置时间、近 30 天重置次数、平均等待时间和最近重置时间。
-            - 新增 LunarWerx 来源标识与“查看证据”按钮，公开数据读取失败时显示明确的不可用状态。
-            - 近期趋势固定为最近 7 天 × 24 小时的一行细柱，共 168 个位置；真实采样柱为橙色，未采样/沿用数据保持浅绿色。
-            - 去除滚轮切换和原生滑轨，保持悬浮球、详情页和手机局域网网页的任务快照、Token、套餐和额度逻辑一致。
+            - 近期趋势改为一条平滑静态曲线，移除最后光点及其他点状动态效果。
+            - 7 个日期标签按每天时间段居中，并在桌面端和手机端使用正常、易读的界面字体。
+            - 保留 168 个小时悬停区域及日期、额度详情，未来时间到达前不绘制曲线。
+            - 中英文 README 更新为对应语言的真实桌面端和手机端截图。
+            - Task status, Token, plan, weekly quota, pairing, reset forecast, and reset-credit logic remain unchanged.
             - Signed Windows installer and updater manifest are included when repository signing secrets are configured.
 
             详细说明见仓库中的 CHANGELOG.md。

@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">Download for Windows</a> ·
-  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.1">v1.0.1 release</a> ·
+  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2">v1.0.2 release</a> ·
   <a href="LICENSE">MIT License</a>
 </p>
 
@@ -26,21 +26,34 @@ These are captures of the desktop application and its LAN web view, not marketin
 
 ### Desktop details
 
-<p align="center"><img src="docs/images/desktop-details.png" alt="Codex QuotaOrb desktop details page" width="620"></p>
+<p align="center"><img src="docs/images/en/desktop-details.png" alt="Codex QuotaOrb desktop details page" width="620"></p>
 
 The details page combines weekly quota, five-hour Plus quota, plan, reset credits, dated daily Token usage, reset forecast, the seven-day trend, and task status in one compact surface.
 
 ### Mobile LAN view
 
-<p align="center"><img src="docs/images/mobile-lan-preview.jpg" alt="Codex QuotaOrb mobile LAN view" width="320"></p>
+<p align="center"><img src="docs/images/en/mobile-lan-preview.png" alt="Codex QuotaOrb mobile LAN view" width="320"></p>
 
 The mobile page is a responsive browser view of the same host snapshot. It needs no mobile installation: keep QuotaOrb running on Windows, pair once, then revisit the saved LAN address from the same Wi‑Fi.
 
 ### Floating views
 
-<p align="center"><img src="docs/images/desktop-orb.png" alt="Desktop floating orb" width="240"> <img src="docs/images/desktop-capsule.png" alt="Desktop capsule" width="560"></p>
+<p align="center"><img src="docs/images/en/desktop-orb.png" alt="Desktop floating orb" width="240"> <img src="docs/images/en/desktop-capsule.png" alt="Desktop capsule" width="560"></p>
 
 Double-click the orb to cycle through the orb, capsule, and details views.
+
+### Settings
+
+<p align="center"><img src="docs/images/en/settings.png" alt="Codex QuotaOrb settings page" width="620"></p>
+
+The settings page keeps theme, startup, always-on-top, update, repository, and contact controls together.
+
+## What's new in v1.0.2
+
+- Replaced the trend strip with one smooth static curve; the final light point and other point effects are removed.
+- Centered the seven date labels in their daily time ranges and switched them to a normal, readable UI font on desktop and mobile.
+- Kept the 168-hour hover columns and date/quota details while leaving future hours unpainted.
+- Refreshed the README with real English desktop and mobile screenshots.
 
 ## Features
 
@@ -55,11 +68,10 @@ Double-click the orb to cycle through the orb, capsule, and details views.
 
 The recent trend starts from the detected weekly reset boundary and keeps a complete seven-day timeline (168 hourly positions). It is persisted locally, so closing and reopening the app does not erase the current cycle.
 
-- Orange bars are real samples.
-- Sage-green bars carry forward the last sampled quota when a later hour has not been sampled.
-- Gray bars represent future hours that have not happened yet.
+- One smooth curve shows the observed quota path.
+- Future hours are left blank until their time arrives; carried-forward values continue the path only through the latest observed hour.
 - The first point of a cycle is normalized to 100%; missing early hours inherit that starting value.
-- Hover a point to see its date, hour, quota, and whether it was sampled or carried forward.
+- Hover any hourly column to see its date, hour, quota, and whether it was sampled or carried forward.
 - A separate **View previous cycle** control shows the saved previous cycle when data exists; otherwise it reports **No data**.
 
 ### Codex reset forecast
@@ -106,7 +118,7 @@ Windows releases are built by GitHub Actions and publish a signed installer, `la
 3. Start Codex, then start Codex QuotaOrb.
 4. Open **Pair** in the details page, scan or copy the LAN address, and enter the four-digit code on a phone connected to the same Wi‑Fi.
 
-The current stable release is [v1.0.1](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.1). Older releases remain available and are not overwritten.
+The current stable release is [v1.0.2](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2). Older releases remain available and are not overwritten.
 
 ## How it works
 

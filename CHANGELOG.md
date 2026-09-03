@@ -4,6 +4,23 @@ All notable changes to Codex QuotaOrb are documented here in Chinese and English
 
 Codex 额度悬浮窗的主要新增、改进和修复均在此以中英文记录。
 
+## v1.0.2 — 2026-09-04
+
+### Improved / 改进
+
+- Replaced the recent-trend point/dash presentation with one smooth static curve; removed the final light point and other point animations. / 近期趋势由点状、虚线展示改为一条平滑静态曲线，移除最后光点和其他点状动态效果。
+- Centered the seven date labels within their daily time ranges and changed them to a normal, readable UI font on desktop and mobile. / 7 个日期标签按每天时间段居中，并在桌面端和手机端改用正常、易读的界面字体。
+- Kept all 168 hourly hover columns and date/quota details while future hours remain unpainted until they arrive. / 保留 168 个小时悬停区域及日期、额度详情，未来时间到达前不绘制曲线。
+- Updated the English and Chinese README files with matching real desktop and mobile screenshots. / 更新中英文自述文件，分别使用对应语言的真实桌面端和手机端截图。
+
+### Scope / 范围
+
+- Task status, Token, plan, weekly quota, pairing, reset forecast, and reset-credit logic remain unchanged. / 任务状态、Token、套餐、周额度、配对、重置预测和可用重置机会逻辑保持不变。
+
+### Release notes / 发行说明
+
+- Windows x64 installer and updater artifacts are published on [GitHub Releases](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2) when repository signing secrets are available. / 配置仓库签名 Secrets 后，Windows x64 安装包和更新文件会发布到 [GitHub Releases](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2)。
+
 ## v1.0.1 — 2026-09-04
 
 ### Fixed / 修复

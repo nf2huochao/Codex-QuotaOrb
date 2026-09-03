@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">下载 Windows 版</a> ·
-  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.1">v1.0.1 发行版</a> ·
+  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2">v1.0.2 发行版</a> ·
   <a href="LICENSE">MIT 许可证</a>
 </p>
 
@@ -26,21 +26,34 @@ Codex 工作时会产生很多有用状态，但额度、重置时间和任务�
 
 ### 桌面详情页
 
-<p align="center"><img src="docs/images/desktop-details.png" alt="Codex 额度悬浮窗桌面详情页" width="620"></p>
+<p align="center"><img src="docs/images/zh/desktop-details.png" alt="Codex 额度悬浮窗桌面详情页" width="620"></p>
 
 详情页集中显示周额度、Plus 五小时额度、套餐、重置机会、带日期的本日 Token、重置预测、7 天趋势和任务状态。
 
 ### 手机局域网网页
 
-<p align="center"><img src="docs/images/mobile-lan-preview.jpg" alt="Codex 额度悬浮窗手机局域网网页" width="320"></p>
+<p align="center"><img src="docs/images/zh/mobile-lan-preview.png" alt="Codex 额度悬浮窗手机局域网网页" width="320"></p>
 
 手机网页是同一份主机快照的响应式浏览器界面，不需要安装手机 App。保持 Windows 端运行，在同一 Wi‑Fi 下配对一次即可反复打开。
 
 ### 悬浮视图
 
-<p align="center"><img src="docs/images/desktop-orb.png" alt="桌面悬浮球" width="240"> <img src="docs/images/desktop-capsule.png" alt="桌面胶囊" width="560"></p>
+<p align="center"><img src="docs/images/zh/desktop-orb.png" alt="桌面悬浮球" width="240"> <img src="docs/images/zh/desktop-capsule.png" alt="桌面胶囊" width="560"></p>
 
 双击悬浮球可循环切换悬浮球、胶囊和详情页。
+
+### 设置页
+
+<p align="center"><img src="docs/images/zh/settings.png" alt="Codex 额度悬浮窗设置页" width="620"></p>
+
+设置页集中提供主题、开机自启、始终置顶、更新、仓库和联系入口。
+
+## v1.0.2 本次更新
+
+- 近期趋势改为一条平滑静态曲线，移除最后光点及其他点状动态效果。
+- 7 个日期标签按每天时间段居中，桌面端和手机端统一使用正常、易读的界面字体。
+- 保留 168 个小时悬停区域，可查看日期和额度；未来时间未到达前不绘制曲线。
+- 自述文件改用真实的中文桌面端和手机端界面截图。
 
 ## 功能特性
 
@@ -55,11 +68,10 @@ Codex 工作时会产生很多有用状态，但额度、重置时间和任务�
 
 近期趋势从识别出的周额度重置边界开始计算，固定保留完整 7 天时间轴（168 个小时位置），并保存到本地，关闭再打开不会清空本周期。
 
-- 橙色柱表示真实采样。
-- 草绿色柱表示没有新采样时沿用上一次额度。
-- 灰色柱表示尚未到达的未来时间。
+- 一条平滑曲线展示已观测到的额度变化。
+- 未来时间在到达前保持空白；沿用额度只延伸到最近一个已观测时间。
 - 每个周期的第一个点固定为 100%；起始阶段没有记录的时间沿用 100%。
-- 鼠标悬停可查看日期、时间、额度，以及“真实采样/沿用”来源。
+- 鼠标悬停每个小时区域可查看日期、时间、额度，以及“真实采样/沿用”来源。
 - 单独的“查看上一周期”按钮用于查看已保存的上一周期；没有数据时显示“无数据”。
 
 ### Codex 重置预测
@@ -106,7 +118,7 @@ Windows 发行流程由 GitHub Actions 构建，并发布签名安装包、`late
 3. 启动 Codex，再启动 Codex 额度悬浮窗。
 4. 在详情页打开“配对”，复制或扫描局域网地址，在同一 Wi‑Fi 的手机上输入四位配对码。
 
-当前稳定版是 [v1.0.1](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.1)，旧版本仍保留，不会被覆盖。
+当前稳定版是 [v1.0.2](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2)，旧版本仍保留，不会被覆盖。
 
 ## 工作方式
 

@@ -100,14 +100,9 @@ button { font:inherit; }
 .history-chart { display:block; width:100%; height:100%; overflow:visible; }
 .history-baseline { stroke:rgba(117,130,111,.28); stroke-width:1; vector-effect:non-scaling-stroke; }
 .history-day-divider { stroke:rgba(117,130,111,.18); stroke-width:1; stroke-dasharray:2 4; vector-effect:non-scaling-stroke; }
-.history-day-label { fill:var(--theme-muted); font-size:10px; font-family:inherit; }
-.history-line { fill:none; stroke:var(--sage); stroke-width:3; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; }
-.history-line.is-future { stroke:rgba(117,130,111,.38); stroke-dasharray:5 5; animation:none; }
-.history-sample-point { fill:var(--apricot); stroke:var(--cream); stroke-width:1.5; vector-effect:non-scaling-stroke; pointer-events:none; }
-.history-hover-point.is-empty { fill:rgba(117,130,111,.28); stroke:var(--cream); stroke-width:1; }
-.history-hover-point.is-future { fill:rgba(117,130,111,.38); stroke:var(--cream); stroke-width:1; }
-.history-hover-point { fill:transparent; stroke:transparent; cursor:crosshair; }
-.history-hover-point:hover,.history-hover-point:focus { fill:var(--apricot); stroke:var(--cream); stroke-width:2; vector-effect:non-scaling-stroke; }
+.history-day-label { fill:var(--theme-muted); font-size:13px; font-family:"Microsoft YaHei UI","PingFang SC",system-ui,sans-serif; font-weight:500; letter-spacing:.03em; }
+.history-line { fill:none; stroke:var(--sage); stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; }
+.history-hover-slot { fill:transparent; cursor:crosshair; }
 .history-grid { display:grid; grid-template-columns:repeat(168,minmax(0,1fr)); grid-template-rows:34px; align-items:end; gap:1px; width:100%; padding:4px 0; }
 .history-slot { display:block; align-self:end; width:100%; height:1px; min-width:0; border-radius:1px 1px 0 0; background:rgba(189,207,174,.28); }
 .history-slot.has-value { height:max(1px,var(--slot-height,1px)); background:var(--sage); box-shadow:inset 0 0 0 1px rgba(255,255,255,.12); }
@@ -131,7 +126,7 @@ button { font:inherit; }
 .pairing-copy-button:disabled,.pairing-test-button:disabled { cursor:wait; opacity:.62; }
 .pairing-feedback { min-height:16px; margin-top:6px; color:var(--theme-muted); font-size:11px!important; }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.01ms!important; animation-iteration-count:1!important; scroll-behavior:auto!important; transition-duration:.01ms!important; } }
-@media (max-width:560px) { .reset-forecast-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } .reset-forecast-grid>div:nth-child(4),.reset-forecast-grid>div:nth-child(5) { grid-column:span 1; } .history-chart-wrap { height:128px; } .details-panel small,.details-panel .weekly-quota-note,.details-panel .freshness,.details-panel .history-summary,.details-panel .task-copy small,.details-panel .task-header span { font-size:12px; } .reset-forecast-head small,.reset-forecast-grid small,.reset-forecast-status,.pairing-feedback { font-size:11px!important; } }
+@media (max-width:560px) { .reset-forecast-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } .reset-forecast-grid>div:nth-child(4),.reset-forecast-grid>div:nth-child(5) { grid-column:span 1; } .history-chart-wrap { height:128px; } .history-day-label { font-size:15px; } .details-panel small,.details-panel .weekly-quota-note,.details-panel .freshness,.details-panel .history-summary,.details-panel .task-copy small,.details-panel .task-header span { font-size:12px; } .reset-forecast-head small,.reset-forecast-grid small,.reset-forecast-status,.pairing-feedback { font-size:11px!important; } }
 @media (max-width:420px) { .detail-grid { grid-template-columns:repeat(2,1fr); } .details-panel { padding:17px; } .reset-forecast-card { padding:10px; } .reset-forecast-grid { gap:5px; } .reset-forecast-grid>div { padding:6px 5px; } .reset-forecast-grid strong { font-size:11px; } }
 :root { --theme-ink:#4f6052; --theme-muted:#7d897d; --theme-panel:#f0eadc; --theme-inset:#e6dfd0; --theme-inner:#f7f1e6; }
 :root[data-theme="mist-blue"] { --cream:#e8edf0; --sage:#afc3cc; --apricot:#c9b18d; --theme-ink:#3f4e55; --theme-muted:#60717a; --theme-panel:#e8edf0; --theme-inset:#e1e9ed; --theme-inner:#edf2f4; }
