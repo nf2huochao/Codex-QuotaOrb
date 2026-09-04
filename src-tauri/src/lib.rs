@@ -368,10 +368,39 @@ fn resolve_codex_binary() -> PathBuf {
     if let Ok(value) = std::env::var("CODEX_BINARY") {
         candidates.push(PathBuf::from(value));
     }
+    if let Ok(path) = std::env::var("PATH") {
+        for directory in std::env::split_paths(&path) {
+            candidates.push(directory.join(if cfg!(windows) { "codex.exe" } else { "codex" }));
+        }
+    }
+    #[cfg(windows)]
     if let Ok(app_data) = std::env::var("APPDATA") {
         candidates.push(PathBuf::from(app_data).join("npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe"));
     }
+    #[cfg(target_os = "macos")]
+    if let Ok(home) = std::env::var("HOME") {
+        let home = PathBuf::from(home);
+        for prefix in [
+            home.join(".npm/node_modules"),
+            home.join(".npm-global/lib/node_modules"),
+            home.join(".local/lib/node_modules"),
+        ] {
+            candidates.push(prefix.join("@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"));
+            candidates.push(prefix.join("@openai/codex/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/bin/codex"));
+        }
+        candidates.push(home.join(".local/bin/codex"));
+        candidates.push(home.join(".volta/bin/codex"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push(PathBuf::from("/opt/homebrew/bin/codex"));
+        candidates.push(PathBuf::from("/usr/local/bin/codex"));
+        candidates.push(PathBuf::from("/usr/bin/codex"));
+    }
+    #[cfg(windows)]
     candidates.push(PathBuf::from("codex.exe"));
+    #[cfg(not(any(windows, target_os = "macos")))]
+    candidates.push(PathBuf::from("codex"));
     candidates
         .into_iter()
         .find(|candidate| candidate.is_file())

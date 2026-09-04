@@ -5,18 +5,18 @@
 <p align="center"><strong>安静、离线优先的 Codex 额度与任务状态伴侣。</strong></p>
 
 <p align="center">
-  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">下载 Windows 版</a> ·
+  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">下载 Windows / Apple Silicon Mac 版</a> ·
   <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2">v1.0.2 发行版</a> ·
   <a href="LICENSE">MIT 许可证</a>
 </p>
 
-Codex 额度悬浮窗把需要随时关注的信息放在 Codex 旁边，不会变成另一个聊天客户端。Windows 桌面端用小型悬浮窗显示额度，详情页集中展示完整信息，同一 Wi‑Fi 下的手机可以通过内置局域网网页查看同一份快照。
+Codex 额度悬浮窗把需要随时关注的信息放在 Codex 旁边，不会变成另一个聊天客户端。Windows 或 macOS 桌面端用小型悬浮窗显示额度，详情页集中展示完整信息，同一 Wi‑Fi 下的手机可以通过内置局域网网页查看同一份快照。
 
 ## 为什么做它
 
 Codex 工作时会产生很多有用状态，但额度、重置时间和任务进度很容易被其他窗口遮住。本项目把这些状态整理成安静、易扫读的伴侣：
 
-- **本地优先：**读取 Windows 主机上可获得的 Codex 状态，不上传提示词、会话正文、密码或文件。
+- **本地优先：**读取本机可获得的 Codex 状态，不上传提示词、会话正文、密码或文件。
 - **一份快照，多种界面：**悬浮球、胶囊、桌面详情页和手机网页使用同一份任务、额度和 Token 快照。
 - **重点照顾手机：**桌面端配对一次，手机打开局域网地址，即使离开电脑也能继续查看状态。
 
@@ -34,7 +34,7 @@ Codex 工作时会产生很多有用状态，但额度、重置时间和任务�
 
 <p align="center"><img src="docs/images/zh/mobile-lan-preview.png" alt="Codex 额度悬浮窗手机局域网网页" width="320"></p>
 
-手机网页是同一份主机快照的响应式浏览器界面，不需要安装手机 App。保持 Windows 端运行，在同一 Wi‑Fi 下配对一次即可反复打开。
+手机网页是同一份主机快照的响应式浏览器界面，不需要安装手机 App。保持 Windows 或 macOS 端运行，在同一 Wi‑Fi 下配对一次即可反复打开。
 
 ### 悬浮视图
 
@@ -109,12 +109,12 @@ Codex 工作时会产生很多有用状态，但额度、重置时间和任务�
 
 “更新数据”会明确显示正在更新、更新成功或暂时失败。托盘菜单提供“检查更新”。
 
-Windows 发行流程由 GitHub Actions 构建，并发布签名安装包、`latest.json` 和对应 `.sig` 文件。桌面更新器会先验证签名，再安装并重启应用。
+Windows 和 Apple Silicon macOS 发行流程由 GitHub Actions 构建。Windows 发布签名安装包；macOS 发布 `.app` / `.dmg` 和更新文件。首个 macOS 测试包暂未进行 Apple 签名和公证，首次打开时可能需要在系统设置中允许。
 
 ## 安装
 
-1. 从 [GitHub Releases](https://github.com/nf2huochao/Codex-QuotaOrb/releases) 下载最新 Windows x64 安装包。
-2. 运行 `.exe` 安装程序；如旧版本正在运行，请先从托盘退出。
+1. 从 [GitHub Releases](https://github.com/nf2huochao/Codex-QuotaOrb/releases) 下载 Windows x64 安装包或 Apple Silicon macOS `.dmg`。
+2. Windows 运行 `.exe`；macOS 打开 `.dmg` 后将应用拖入“应用程序”。若测试包被拦截，请在“系统设置 → 隐私与安全性”中允许。
 3. 启动 Codex，再启动 Codex 额度悬浮窗。
 4. 在详情页打开“配对”，复制或扫描局域网地址，在同一 Wi‑Fi 的手机上输入四位配对码。
 
@@ -139,13 +139,14 @@ Windows 发行流程由 GitHub Actions 构建，并发布签名安装包、`late
 | 界面 | 支持情况 |
 | --- | --- |
 | Windows 桌面端 | Windows 10/11 x64 |
+| macOS 桌面端 | Apple Silicon（aarch64），测试包 |
 | 手机浏览器 | 同一 Wi‑Fi 下的现代 iPhone、Android、平板和 Kindle 浏览器 |
-| macOS/Linux 原生悬浮窗 | 暂不支持 |
+| Linux 原生悬浮窗 | 暂不支持 |
 | 公网远程访问 | 暂不支持 |
 
 ## 开发
 
-需要 Node.js、Rust 和 Windows C++ 构建工具。
+需要 Node.js 和 Rust。Windows 本机构建还需要 Windows C++ 构建工具；macOS 本机构建需要 Xcode Command Line Tools。
 
 ```powershell
 npm.cmd install

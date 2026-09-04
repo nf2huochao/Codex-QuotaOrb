@@ -5,18 +5,18 @@
 <p align="center"><strong>A quiet, local-first companion for watching Codex quota and task progress.</strong></p>
 
 <p align="center">
-  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">Download for Windows</a> ·
+  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">Download for Windows / macOS Apple Silicon</a> ·
   <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2">v1.0.2 release</a> ·
   <a href="LICENSE">MIT License</a>
 </p>
 
-Codex QuotaOrb keeps the information you need beside Codex without becoming another chat client. A small Windows HUD shows the current quota at a glance; the details view gives you the complete picture; a phone on the same Wi‑Fi can observe the same snapshot through the built-in LAN web view.
+Codex QuotaOrb keeps the information you need beside Codex without becoming another chat client. A small Windows or macOS HUD shows the current quota at a glance; the details view gives you the complete picture; a phone on the same Wi‑Fi can observe the same snapshot through the built-in LAN web view.
 
 ## Why QuotaOrb
 
 Codex exposes useful state while you work, but it is easy to lose the quota, reset timing, or task status behind another window. QuotaOrb turns that state into a calm, glanceable companion:
 
-- **Local-first:** reads the Codex state available on the Windows host; prompts, session bodies, passwords, and files are not uploaded.
+- **Local-first:** reads the Codex state available on the host; prompts, session bodies, passwords, and files are not uploaded.
 - **One snapshot, several surfaces:** the floating orb, capsule, desktop details page, and mobile web page share the same task, quota, and Token snapshot.
 - **Designed for the phone:** pair once from the desktop, open the LAN address on a phone, and keep the dashboard available while you move away from the Windows screen.
 
@@ -34,7 +34,7 @@ The details page combines weekly quota, five-hour Plus quota, plan, reset credit
 
 <p align="center"><img src="docs/images/en/mobile-lan-preview.png" alt="Codex QuotaOrb mobile LAN view" width="320"></p>
 
-The mobile page is a responsive browser view of the same host snapshot. It needs no mobile installation: keep QuotaOrb running on Windows, pair once, then revisit the saved LAN address from the same Wi‑Fi.
+The mobile page is a responsive browser view of the same host snapshot. It needs no mobile installation: keep QuotaOrb running on Windows or macOS, pair once, then revisit the saved LAN address from the same Wi‑Fi.
 
 ### Floating views
 
@@ -109,12 +109,12 @@ It also includes bilingual switching, start with Windows, always on top, and che
 
 The **Update data** action reports updating, success, or temporary failure so a refresh never feels ambiguous. The tray menu also includes **Check for updates**.
 
-Windows releases are built by GitHub Actions and publish a signed installer, `latest.json`, and the matching `.sig` updater artifact. The desktop updater verifies the signature before installing and restarting the app.
+Windows and Apple Silicon macOS releases are built by GitHub Actions. Windows publishes a signed installer; macOS publishes `.app` / `.dmg` and updater artifacts. The first macOS test package is not Apple-signed or notarized, so macOS may require allowing it in System Settings.
 
 ## Installation
 
-1. Download the latest Windows x64 installer from [GitHub Releases](https://github.com/nf2huochao/Codex-QuotaOrb/releases).
-2. Run the `.exe` installer. Quit an older running instance from the tray first if necessary.
+1. Download the Windows x64 installer or the Apple Silicon macOS `.dmg` from [GitHub Releases](https://github.com/nf2huochao/Codex-QuotaOrb/releases).
+2. On Windows run the `.exe`; on macOS open the `.dmg` and move the app to Applications. For the unsigned test package, allow it in **System Settings → Privacy & Security** if prompted.
 3. Start Codex, then start Codex QuotaOrb.
 4. Open **Pair** in the details page, scan or copy the LAN address, and enter the four-digit code on a phone connected to the same Wi‑Fi.
 
@@ -139,13 +139,14 @@ The trend store is local to the host. A reset-derived cycle key starts a new sev
 | Surface | Support |
 | --- | --- |
 | Windows desktop | Windows 10/11 x64 |
+| macOS desktop | Apple Silicon (aarch64), test package |
 | Mobile browser | Modern iPhone, Android, tablet, and Kindle browsers on the same Wi‑Fi |
-| macOS/Linux native HUD | Not included |
+| Linux native HUD | Not included |
 | Public remote access | Not included |
 
 ## Development
 
-Requirements: Node.js, Rust, and Windows C++ build tools.
+Requirements: Node.js and Rust. Windows local builds additionally need Windows C++ build tools; macOS local builds require Xcode Command Line Tools.
 
 ```powershell
 npm.cmd install
