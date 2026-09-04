@@ -74,9 +74,8 @@ jobs:
           fi
           signature_file="$(find src-tauri/target -type f -name '*.app.tar.gz.sig' -print -quit)"
           test -n "$signature_file" || { echo "macOS updater signature was not generated."; exit 1; }
-          artifact_name="$(basename "${signature_file%.sig}")"
           signature="$(tr -d '\r\n' < "$signature_file")"
-          artifact_url="$(gh release view "$RELEASE_TAG" --json assets --jq ".assets[] | select(.name == \"$artifact_name\") | .url" | head -n 1)"
+          artifact_url="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[] | select(.name | endswith(".app.tar.gz")) | .url' | head -n 1)"
           test -n "$artifact_url" || { echo "macOS updater artifact was not found in release."; exit 1; }
           tmp="$RUNNER_TEMP/codex-manifest/latest.merged.json"
           jq --arg version "${RELEASE_TAG#v}" \
