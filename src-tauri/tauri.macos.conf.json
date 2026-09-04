@@ -3,6 +3,10 @@
   "app": {
     "macOSPrivateApi": true
   },
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
   "bundle": {
     "targets": ["app", "dmg"],
     "icon": ["icons/icon.icns"]
