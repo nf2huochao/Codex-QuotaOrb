@@ -49,12 +49,11 @@ jobs:
           releaseBody: |
             ## 本次更新 / Release notes
 
-            - 近期趋势改为一条平滑静态曲线，移除最后光点及其他点状动态效果。
-            - 7 个日期标签按每天时间段居中，并在桌面端和手机端使用正常、易读的界面字体。
-            - 保留 168 个小时悬停区域及日期、额度详情，未来时间到达前不绘制曲线。
-            - 中英文 README 更新为对应语言的真实桌面端和手机端截图。
-            - Task status, Token, plan, weekly quota, pairing, reset forecast, and reset-credit logic remain unchanged.
-            - Signed Windows installer and updater manifest are included when repository signing secrets are configured.
+            - 增加 Codex 路径自动检测和手动指定，Windows 优先使用当前 npm 安装版本。
+            - Codex 用量接口暂时超时时仍保留最新额度显示，旧用量保留并自动重试。
+            - 错误提示区分超时、网络、登录和协议问题。
+            - Added automatic and user-selected Codex executable paths, with graceful quota fallback when usage data is temporarily unavailable.
+            - Signed Windows installer, `latest.json`, and `.sig` are included when repository signing secrets are configured.
 
             详细说明见仓库中的 CHANGELOG.md。
           releaseDraft: false
