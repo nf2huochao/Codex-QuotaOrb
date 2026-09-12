@@ -360,8 +360,9 @@ export function mountDetailsPanel(
       tokensValue.textContent = formatTokens(snapshot.todayTokens)
       freshness.className = `freshness ${snapshot.status}`
       const source = sourceLabel(snapshot.source, language)
+      const warning = snapshot.error === 'usage_unavailable' ? t('usageUnavailable', language) : snapshot.error
       freshness.textContent = snapshot.status === 'fresh'
-        ? `${t('connected', language)} · ${t('recentlyUpdated', language)} ${formatRecentTime(snapshot.fetchedAt, language)}${source ? ` · ${source}` : ''}`
+        ? `${t('connected', language)} · ${t('recentlyUpdated', language)} ${formatRecentTime(snapshot.fetchedAt, language)}${source ? ` · ${source}` : ''}${warning ? ` · ${warning}` : ''}`
         : snapshot.status === 'stale'
           ? `${snapshot.error ?? t('dataExpired', language)} · ${t('reconnecting', language)} · ${t('keepLastData', language)} · ${t('lastSuccess', language)} ${formatRecentTime(snapshot.fetchedAt, language)}${source ? ` · ${source}` : ''}`
           : `${snapshot.error ?? t('temporarilyUnavailable', language)} · ${t('keepLastData', language)} · ${t('lastSuccess', language)} ${formatRecentTime(snapshot.fetchedAt, language)}`

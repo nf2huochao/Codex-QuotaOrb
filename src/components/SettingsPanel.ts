@@ -10,11 +10,15 @@ export interface SettingsActions {
   setAutostart: (enabled: boolean) => Promise<void>
   getAlwaysOnTop: () => Promise<boolean>
   setAlwaysOnTop: (enabled: boolean) => Promise<void>
+  getCodexBinaryPath: () => Promise<string | null>
+  setCodexBinaryPath: (path: string) => Promise<string>
+  clearCodexBinaryPath: () => Promise<void>
 }
 
 export interface MountedSettingsView extends MountedView {
   setAutostart(value: boolean): void
   setAlwaysOnTop(value: boolean): void
+  setCodexBinaryPath(value: string | null): void
 }
 
 const THEME_LABELS: Record<ThemeId, string> = {
@@ -31,6 +35,7 @@ export function mountSettingsPanel(root: HTMLElement, actions: SettingsActions):
     <header class="settings-header"><div><small class="settings-kicker">CODEX</small><h1 class="settings-title"></h1></div><div class="settings-actions"><button class="close-button settings-language" type="button"></button><button class="close-button settings-back" type="button"></button></div></header>
     <section class="settings-section"><div class="settings-section-title"><strong class="appearance-label"></strong><small class="choose-theme-label"></small></div><div class="theme-grid"></div><button class="settings-reset-theme" type="button"></button></section>
     <section class="settings-section"><strong class="behavior-label"></strong><label class="settings-switch"><span><b class="autostart-label"></b><small class="autostart-hint"></small></span><input class="autostart-input" type="checkbox"></label><label class="settings-switch"><span><b class="always-on-top-label"></b><small class="always-on-top-hint"></small></span><input class="always-on-top-input" type="checkbox"></label></section>
+    <section class="settings-section"><div class="settings-section-title"><strong class="codex-path-label"></strong><small class="codex-path-hint"></small></div><input class="codex-path-input" type="text" spellcheck="false"><div class="settings-row settings-path-actions"><button class="settings-path-save" type="button"></button><button class="settings-path-clear" type="button"></button></div><small class="codex-path-status"></small></section>
     <section class="settings-section"><strong class="updates-label"></strong><div class="settings-row"><span><b class="check-updates-label"></b><small class="update-status"></small></span><button class="settings-update-button" type="button"></button></div></section>
     <section class="settings-section settings-about"><strong class="about-label"></strong><a href="https://github.com/nf2huochao/Codex-QuotaOrb" target="_blank" rel="noreferrer"><span class="github-label"></span><small>github.com/nf2huochao/Codex-QuotaOrb</small></a><a href="mailto:huochao1210@gmail.com"><span class="contact-label"></span><small>huochao1210@gmail.com</small></a><small class="license-label"></small><small class="privacy-label"></small></section>
   </section>`
@@ -42,6 +47,10 @@ export function mountSettingsPanel(root: HTMLElement, actions: SettingsActions):
   const updateStatus = root.querySelector<HTMLElement>('.update-status')!
   const autostartInput = root.querySelector<HTMLInputElement>('.autostart-input')!
   const alwaysOnTopInput = root.querySelector<HTMLInputElement>('.always-on-top-input')!
+  const codexPathInput = root.querySelector<HTMLInputElement>('.codex-path-input')!
+  const codexPathSave = root.querySelector<HTMLButtonElement>('.settings-path-save')!
+  const codexPathClear = root.querySelector<HTMLButtonElement>('.settings-path-clear')!
+  const codexPathStatus = root.querySelector<HTMLElement>('.codex-path-status')!
   let language = getLanguage()
 
   const renderThemes = () => {
@@ -68,6 +77,11 @@ export function mountSettingsPanel(root: HTMLElement, actions: SettingsActions):
     root.querySelector<HTMLElement>('.autostart-hint')!.textContent = t('autostartHint', language)
     root.querySelector<HTMLElement>('.always-on-top-label')!.textContent = t('alwaysOnTop', language)
     root.querySelector<HTMLElement>('.always-on-top-hint')!.textContent = t('alwaysOnTopHint', language)
+    root.querySelector<HTMLElement>('.codex-path-label')!.textContent = t('codexPath', language)
+    root.querySelector<HTMLElement>('.codex-path-hint')!.textContent = t('codexPathHint', language)
+    codexPathInput.placeholder = t('codexPathPlaceholder', language)
+    codexPathSave.textContent = t('saveCodexPath', language)
+    codexPathClear.textContent = t('autoDetectCodex', language)
     root.querySelector<HTMLElement>('.updates-label')!.textContent = t('updates', language)
     root.querySelector<HTMLElement>('.check-updates-label')!.textContent = t('checkUpdates', language)
     updateButton.textContent = t('checkUpdates', language)
@@ -84,6 +98,36 @@ export function mountSettingsPanel(root: HTMLElement, actions: SettingsActions):
   root.querySelector<HTMLButtonElement>('.settings-reset-theme')!.addEventListener('click', () => { setTheme('sage'); renderThemes() })
   autostartInput.addEventListener('change', () => { void actions.setAutostart(autostartInput.checked).catch(() => { autostartInput.checked = !autostartInput.checked }) })
   alwaysOnTopInput.addEventListener('change', () => { void actions.setAlwaysOnTop(alwaysOnTopInput.checked).catch(() => { alwaysOnTopInput.checked = !alwaysOnTopInput.checked }) })
+  codexPathSave.addEventListener('click', async () => {
+    const path = codexPathInput.value.trim()
+    if (!path) {
+      codexPathStatus.textContent = t('codexPathRequired', language)
+      return
+    }
+    codexPathSave.disabled = true
+    codexPathStatus.textContent = t('validatingCodexPath', language)
+    try {
+      const saved = await actions.setCodexBinaryPath(path)
+      codexPathInput.value = saved
+      codexPathStatus.textContent = t('codexPathSaved', language)
+    } catch (error) {
+      codexPathStatus.textContent = error instanceof Error ? error.message : String(error)
+    } finally {
+      codexPathSave.disabled = false
+    }
+  })
+  codexPathClear.addEventListener('click', async () => {
+    codexPathClear.disabled = true
+    try {
+      await actions.clearCodexBinaryPath()
+      codexPathInput.value = ''
+      codexPathStatus.textContent = t('codexPathAuto', language)
+    } catch (error) {
+      codexPathStatus.textContent = error instanceof Error ? error.message : String(error)
+    } finally {
+      codexPathClear.disabled = false
+    }
+  })
   updateButton.addEventListener('click', async () => {
     updateButton.disabled = true
     updateStatus.textContent = t('checkingUpdates', language)
@@ -93,12 +137,14 @@ export function mountSettingsPanel(root: HTMLElement, actions: SettingsActions):
   renderCopy()
   void actions.getAutostart().then((value) => { autostartInput.checked = value }).catch(() => undefined)
   void actions.getAlwaysOnTop().then((value) => { alwaysOnTopInput.checked = value }).catch(() => undefined)
+  void actions.getCodexBinaryPath().then((value) => { codexPathInput.value = value ?? '' }).catch(() => undefined)
 
   return {
     update(_snapshot: Snapshot) {},
     setLanguage(value) { language = value; renderCopy() },
     setAutostart(value) { autostartInput.checked = value },
     setAlwaysOnTop(value) { alwaysOnTopInput.checked = value },
+    setCodexBinaryPath(value) { codexPathInput.value = value ?? '' },
     setRefreshing(_value: boolean) {},
     destroy() { window.removeEventListener(THEME_EVENT, renderThemes); root.replaceChildren() },
   }

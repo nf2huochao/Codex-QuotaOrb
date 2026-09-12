@@ -1,6 +1,6 @@
 use crate::{
     codex_client::CodexClient,
-    codex_protocol::{NormalizedTaskEvent, ThreadSummary},
+    codex_protocol::{NormalizedTaskEvent, RateLimitResponse, ThreadSummary, UsageResponse},
     diagnostics,
     domain::{map_task_status, snapshot_status, Snapshot, TaskEvent, TaskStatus, TaskSummary},
     rollout_watcher::{default_root, RolloutWatcher},
@@ -27,8 +27,8 @@ pub async fn poll_once(
 ) -> Snapshot {
     let rate = client.read_rate_limits().await;
     let usage = client.read_usage().await;
-    match (rate, usage) {
-        (Ok(rate), Ok(usage)) => {
+    match rate {
+        Ok(rate) => {
             let rollout_tasks = RolloutWatcher::new(default_root()).scan(now);
             let mut registry = TaskRegistry::from_tasks(&previous.tasks);
             registry.merge_sources(rollout_tasks, now);
@@ -37,7 +37,7 @@ pub async fn poll_once(
                 .iter()
                 .filter(|task| matches!(task.status, TaskStatus::Running | TaskStatus::NeedsAction))
                 .count() as u32;
-            let snapshot = Snapshot {
+            let mut snapshot = Snapshot {
                 status: snapshot_status(Some(now), now, false, true),
                 changed_at: Some(now),
                 source: Some("full-poll".into()),
@@ -48,8 +48,8 @@ pub async fn poll_once(
                 five_hour_resets_at: rate.five_hour_resets_at,
                 plan: rate.plan,
                 reset_credits: rate.reset_credits,
-                today_tokens: usage.today_tokens,
-                usage_date: usage.usage_date,
+                today_tokens: previous.today_tokens,
+                usage_date: previous.usage_date.clone(),
                 active_task_count,
                 task_counts: registry.counts(),
                 tasks,
@@ -63,23 +63,39 @@ pub async fn poll_once(
                 hook_diagnostics: previous.hook_diagnostics.clone(),
                 schema_version: crate::domain::SNAPSHOT_SCHEMA_VERSION.into(),
             };
+            if let Ok(usage) = usage {
+                apply_usage(&mut snapshot, usage);
+            } else {
+                snapshot.error = Some("usage_unavailable".into());
+            }
             store.publish_if_changed(snapshot.clone());
             snapshot
         }
-        (rate_result, usage_result) => {
+        Err(rate_error) => {
             let mut stale = previous.clone();
             stale.changed_at = Some(now);
             stale.source = Some("full-poll".into());
             stale.status = snapshot_status(previous.fetched_at, now, true, true);
-            let error = rate_result.err().or_else(|| usage_result.err());
-            stale.error = error
-                .as_ref()
-                .map(|error| diagnostics::classify(error).message().to_owned())
-                .or_else(|| Some("读取 Codex 数据失败".into()));
+            stale.error = Some(diagnostics::classify(&rate_error).message().to_owned());
             store.publish_if_changed(stale.clone());
             stale
         }
     }
+}
+
+fn apply_usage(snapshot: &mut Snapshot, usage: UsageResponse) {
+    snapshot.today_tokens = usage.today_tokens;
+    snapshot.usage_date = usage.usage_date;
+    snapshot.error = None;
+}
+
+fn apply_rate_limits(snapshot: &mut Snapshot, rate: RateLimitResponse) {
+    snapshot.quota_remaining_percent = rate.remaining_percent;
+    snapshot.quota_resets_at = rate.resets_at;
+    snapshot.five_hour_remaining_percent = rate.five_hour_remaining_percent;
+    snapshot.five_hour_resets_at = rate.five_hour_resets_at;
+    snapshot.plan = rate.plan;
+    snapshot.reset_credits = rate.reset_credits;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -452,21 +468,18 @@ pub fn spawn_poll_loop(
                         if is_metrics_notification(method) {
                             let rate = client.read_rate_limits().await;
                             let usage = client.read_usage().await;
-                            if let (Ok(rate), Ok(usage)) = (rate, usage) {
+                            if let Ok(rate) = rate {
                                 let mut next = previous.clone();
                                 next.changed_at = Some(now);
                                 next.source = Some("app-server-event".into());
                                 next.status = snapshot_status(Some(now), now, false, client.is_connected());
                                 next.fetched_at = Some(now);
-                                next.quota_remaining_percent = rate.remaining_percent;
-                                next.quota_resets_at = rate.resets_at;
-                                next.five_hour_remaining_percent = rate.five_hour_remaining_percent;
-                                next.five_hour_resets_at = rate.five_hour_resets_at;
-                                next.plan = rate.plan;
-                                next.reset_credits = rate.reset_credits;
-                                next.today_tokens = usage.today_tokens;
-                                next.usage_date = usage.usage_date;
-                                next.error = None;
+                                apply_rate_limits(&mut next, rate);
+                                if let Ok(usage) = usage {
+                                    apply_usage(&mut next, usage);
+                                } else {
+                                    next.error = Some("usage_unavailable".into());
+                                }
                                 store.publish_if_changed(next);
                                 previous = store.current();
                             }
@@ -480,21 +493,18 @@ pub fn spawn_poll_loop(
                     let now = chrono_like_now();
                     let rate = client.read_rate_limits().await;
                     let usage = client.read_usage().await;
-                    if let (Ok(rate), Ok(usage)) = (rate, usage) {
+                    if let Ok(rate) = rate {
                         let mut next = previous.clone();
                         next.changed_at = Some(now);
                         next.source = Some("metrics-poll".into());
                         next.status = snapshot_status(Some(now), now, false, client.is_connected());
                         next.fetched_at = Some(now);
-                        next.quota_remaining_percent = rate.remaining_percent;
-                        next.quota_resets_at = rate.resets_at;
-                        next.five_hour_remaining_percent = rate.five_hour_remaining_percent;
-                        next.five_hour_resets_at = rate.five_hour_resets_at;
-                        next.plan = rate.plan;
-                        next.reset_credits = rate.reset_credits;
-                        next.today_tokens = usage.today_tokens;
-                        next.usage_date = usage.usage_date;
-                        next.error = None;
+                        apply_rate_limits(&mut next, rate);
+                        if let Ok(usage) = usage {
+                            apply_usage(&mut next, usage);
+                        } else {
+                            next.error = Some("usage_unavailable".into());
+                        }
                         store.publish_if_changed(next.clone());
                         previous = store.current();
                     }
@@ -637,6 +647,47 @@ fn chrono_like_now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_failure_keeps_previous_usage_while_rate_limits_can_update() {
+        let mut snapshot = crate::snapshot_store::empty_snapshot();
+        snapshot.today_tokens = Some(42);
+        snapshot.usage_date = Some("2026-09-12".into());
+        apply_rate_limits(
+            &mut snapshot,
+            RateLimitResponse {
+                remaining_percent: Some(88),
+                resets_at: Some(123),
+                five_hour_remaining_percent: Some(76),
+                five_hour_resets_at: Some(456),
+                plan: Some("plus".into()),
+                reset_credits: Some(1),
+            },
+        );
+        snapshot.error = Some("usage_unavailable".into());
+        assert_eq!(snapshot.quota_remaining_percent, Some(88));
+        assert_eq!(snapshot.five_hour_remaining_percent, Some(76));
+        assert_eq!(snapshot.today_tokens, Some(42));
+        assert_eq!(snapshot.usage_date.as_deref(), Some("2026-09-12"));
+        assert!(snapshot.error.is_some());
+    }
+
+    #[test]
+    fn successful_usage_replaces_previous_usage_and_clears_warning() {
+        let mut snapshot = crate::snapshot_store::empty_snapshot();
+        snapshot.today_tokens = Some(42);
+        snapshot.error = Some("usage_unavailable".into());
+        apply_usage(
+            &mut snapshot,
+            UsageResponse {
+                today_tokens: Some(99),
+                usage_date: Some("2026-09-13".into()),
+            },
+        );
+        assert_eq!(snapshot.today_tokens, Some(99));
+        assert_eq!(snapshot.usage_date.as_deref(), Some("2026-09-13"));
+        assert_eq!(snapshot.error, None);
+    }
 
     #[test]
     fn sync_intervals_match_product_contract() {

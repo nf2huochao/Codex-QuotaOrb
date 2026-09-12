@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">Download for Windows / macOS Apple Silicon</a> ·
-  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2">v1.0.2 release</a> ·
+  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.3">v1.0.3 release</a> ·
   <a href="LICENSE">MIT License</a>
 </p>
 
@@ -47,6 +47,12 @@ Double-click the orb to cycle through the orb, capsule, and details views.
 <p align="center"><img src="docs/images/en/settings.png" alt="Codex QuotaOrb settings page" width="620"></p>
 
 The settings page keeps theme, startup, always-on-top, update, repository, and contact controls together.
+
+## What's new in v1.0.3
+
+- Added automatic and user-selected Codex executable paths, with Windows preference for the current npm installation.
+- Quota data remains usable when the Codex usage endpoint times out; usage values are retained and retried.
+- Improved diagnostics distinguish timeout, network, login, and protocol failures.
 
 ## What's new in v1.0.2
 
@@ -118,7 +124,7 @@ Windows and Apple Silicon macOS releases are built by GitHub Actions. Windows pu
 3. Start Codex, then start Codex QuotaOrb.
 4. Open **Pair** in the details page, scan or copy the LAN address, and enter the four-digit code on a phone connected to the same Wi‑Fi.
 
-The current stable release is [v1.0.2](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2). Older releases remain available and are not overwritten.
+The current stable release is [v1.0.3](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.3). Older releases remain available and are not overwritten.
 
 ## How it works
 

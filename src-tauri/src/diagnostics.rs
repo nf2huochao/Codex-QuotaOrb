@@ -41,14 +41,31 @@ pub fn classify(error: &CodexError) -> DiagnosticCategory {
         }
         CodexError::Protocol(_) => DiagnosticCategory::MalformedResponse,
         CodexError::Json(_) => DiagnosticCategory::ProtocolMismatch,
-        CodexError::Response(text)
-            if text.to_ascii_lowercase().contains("unauthenticated")
-                || text.to_ascii_lowercase().contains("login") =>
-        {
-            DiagnosticCategory::NotLoggedIn
-        }
-        CodexError::Response(_) => DiagnosticCategory::ProtocolMismatch,
+        CodexError::Response(text) => classify_response(text),
     }
+}
+
+fn classify_response(text: &str) -> DiagnosticCategory {
+    let text = text.to_ascii_lowercase();
+    if text.contains("unauthenticated") || text.contains("login") {
+        return DiagnosticCategory::NotLoggedIn;
+    }
+    if text.contains("timed out")
+        || text.contains("timeout")
+        || text.contains("connection reset")
+        || text.contains("connection refused")
+        || text.contains("network")
+    {
+        return if text.contains("network")
+            || text.contains("connection reset")
+            || text.contains("connection refused")
+        {
+            DiagnosticCategory::NetworkUnavailable
+        } else {
+            DiagnosticCategory::Timeout
+        };
+    }
+    DiagnosticCategory::ProtocolMismatch
 }
 
 pub fn diagnostic(category: DiagnosticCategory, schema_version: &str) -> Diagnostic {
@@ -71,5 +88,23 @@ mod tests {
         let text = serde_json::to_string(&diagnostic).unwrap();
         assert!(!text.contains("token"));
         assert_eq!(DiagnosticCategory::Timeout.message(), "读取 Codex 数据超时");
+    }
+
+    #[test]
+    fn backend_usage_timeout_is_not_reported_as_protocol_mismatch() {
+        assert_eq!(
+            classify(&CodexError::Response(
+                "{\"message\":\"token usage profile fetch timed out\"}".into()
+            )),
+            DiagnosticCategory::Timeout
+        );
+        assert_eq!(
+            classify(&CodexError::Response("connection reset by peer".into())),
+            DiagnosticCategory::NetworkUnavailable
+        );
+        assert_eq!(
+            classify(&CodexError::Response("method not found".into())),
+            DiagnosticCategory::ProtocolMismatch
+        );
     }
 }

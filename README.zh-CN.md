@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">下载 Windows / Apple Silicon Mac 版</a> ·
-  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2">v1.0.2 发行版</a> ·
+  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.3">v1.0.3 发行版</a> ·
   <a href="LICENSE">MIT 许可证</a>
 </p>
 
@@ -47,6 +47,12 @@ Codex 工作时会产生很多有用状态，但额度、重置时间和任务�
 <p align="center"><img src="docs/images/zh/settings.png" alt="Codex 额度悬浮窗设置页" width="620"></p>
 
 设置页集中提供主题、开机自启、始终置顶、更新、仓库和联系入口。
+
+## v1.0.3 本次更新
+
+- 增加 Codex 路径自动检测和手动指定，Windows 优先使用当前 npm 安装版本。
+- Codex 用量接口超时时仍保留最新额度显示，旧用量保留并自动重试。
+- 错误提示区分超时、网络、登录和协议问题。
 
 ## v1.0.2 本次更新
 
@@ -118,7 +124,7 @@ Windows 和 Apple Silicon macOS 发行流程由 GitHub Actions 构建。Windows 
 3. 启动 Codex，再启动 Codex 额度悬浮窗。
 4. 在详情页打开“配对”，复制或扫描局域网地址，在同一 Wi‑Fi 的手机上输入四位配对码。
 
-当前稳定版是 [v1.0.2](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2)，旧版本仍保留，不会被覆盖。
+当前稳定版是 [v1.0.3](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.3)，旧版本仍保留，不会被覆盖。
 
 ## 工作方式
 

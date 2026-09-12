@@ -4,6 +4,14 @@ All notable changes to Codex QuotaOrb are documented here in Chinese and English
 
 Codex 额度悬浮窗的主要新增、改进和修复均在此以中英文记录。
 
+## v1.0.3 — 2026-09-13
+
+### Fixed / 修复
+
+- Codex binary discovery now prefers the current npm-installed executable on Windows, with a user-selected path override and automatic fallback. / Windows 现在优先使用 npm 安装的当前 Codex，支持用户指定路径并保留自动回退。
+- A temporary `account/usage/read` timeout no longer blocks fresh quota values; the previous usage value is retained and retried. / `account/usage/read` 暂时超时不会再阻止最新额度显示，旧用量会保留并自动重试。
+- Timeout, network, login, and protocol failures now receive distinct diagnostics. / 超时、网络、登录和协议错误现在分别提示。
+
 ## v1.0.2 — 2026-09-04
 
 ### Improved / 改进

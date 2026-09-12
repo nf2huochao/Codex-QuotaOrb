@@ -12,8 +12,9 @@ pub(crate) mod snapshot_store;
 pub(crate) mod task_registry;
 pub(crate) mod tray;
 
+use serde::{Deserialize, Serialize};
 use snapshot_store::{empty_snapshot, SnapshotStore};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use tauri::{Emitter, Manager};
 #[cfg(desktop)]
@@ -26,6 +27,59 @@ pub struct AppState {
     pub pairing: Arc<RwLock<lan_server::PairingState>>,
     pub pairing_path: PathBuf,
     pub hook_bridge: hook_bridge::HookBridge,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+struct CodexSettings {
+    codex_binary: Option<String>,
+}
+
+fn app_config_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("com.codex.quota-floating-window")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("Library/Application Support/com.codex.quota-floating-window")
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".config/com.codex.quota-floating-window")
+    }
+}
+
+fn codex_settings_path() -> PathBuf {
+    app_config_dir().join("codex-settings.json")
+}
+
+fn read_codex_override() -> Option<PathBuf> {
+    let bytes = std::fs::read(codex_settings_path()).ok()?;
+    let settings = serde_json::from_slice::<CodexSettings>(&bytes).ok()?;
+    settings
+        .codex_binary
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+}
+
+fn write_codex_override(path: Option<&Path>) -> Result<(), String> {
+    let directory = app_config_dir();
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let settings = CodexSettings {
+        codex_binary: path.map(|value| value.to_string_lossy().into_owned()),
+    };
+    let bytes = serde_json::to_vec_pretty(&settings).map_err(|error| error.to_string())?;
+    std::fs::write(codex_settings_path(), bytes).map_err(|error| error.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -211,7 +265,36 @@ fn get_always_on_top(window: tauri::Window) -> Result<bool, String> {
 
 #[tauri::command]
 fn set_always_on_top(enabled: bool, window: tauri::Window) -> Result<(), String> {
-    window.set_always_on_top(enabled).map_err(|error| error.to_string())
+    window
+        .set_always_on_top(enabled)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_codex_binary_path() -> Option<String> {
+    read_codex_override().map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn set_codex_binary_path(path: String) -> Result<String, String> {
+    let path = PathBuf::from(path.trim());
+    if !path.is_file() {
+        return Err("找不到 Codex 可执行文件".into());
+    }
+    let client = codex_client::CodexClient::spawn(&path)
+        .await
+        .map_err(|error| format!("Codex 路径验证失败：{error}"))?;
+    client
+        .stop()
+        .await
+        .map_err(|error| format!("Codex 路径验证失败：{error}"))?;
+    write_codex_override(Some(&path))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn clear_codex_binary_path() -> Result<(), String> {
+    write_codex_override(None)
 }
 #[cfg(test)]
 mod codex_client_tests;
@@ -262,7 +345,10 @@ pub fn run() {
             get_autostart,
             set_autostart,
             get_always_on_top,
-            set_always_on_top
+            set_always_on_top,
+            get_codex_binary_path,
+            set_codex_binary_path,
+            clear_codex_binary_path
         ])
         .setup(move |app| {
             tray::setup_tray(app.handle())?;
@@ -365,17 +451,20 @@ fn now() -> i64 {
 
 fn resolve_codex_binary() -> PathBuf {
     let mut candidates = Vec::new();
+    if let Some(path) = read_codex_override() {
+        candidates.push(path);
+    }
     if let Ok(value) = std::env::var("CODEX_BINARY") {
         candidates.push(PathBuf::from(value));
+    }
+    #[cfg(windows)]
+    if let Ok(app_data) = std::env::var("APPDATA") {
+        candidates.push(PathBuf::from(app_data).join("npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe"));
     }
     if let Ok(path) = std::env::var("PATH") {
         for directory in std::env::split_paths(&path) {
             candidates.push(directory.join(if cfg!(windows) { "codex.exe" } else { "codex" }));
         }
-    }
-    #[cfg(windows)]
-    if let Ok(app_data) = std::env::var("APPDATA") {
-        candidates.push(PathBuf::from(app_data).join("npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe"));
     }
     #[cfg(target_os = "macos")]
     if let Ok(home) = std::env::var("HOME") {

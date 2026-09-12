@@ -117,6 +117,21 @@ async function setAlwaysOnTopSetting(enabled: boolean) {
   window.localStorage.setItem(ALWAYS_ON_TOP_STORAGE_KEY, String(enabled))
 }
 
+async function getCodexBinaryPathSetting() {
+  if (designPreview) return null
+  return invoke<string | null>('get_codex_binary_path')
+}
+
+async function setCodexBinaryPathSetting(path: string) {
+  if (designPreview) return path
+  return invoke<string>('set_codex_binary_path', { path })
+}
+
+async function clearCodexBinaryPathSetting() {
+  if (designPreview) return
+  await invoke('clear_codex_binary_path')
+}
+
 function restoreAlwaysOnTopSetting() {
   if (designPreview) return
   const saved = window.localStorage.getItem(ALWAYS_ON_TOP_STORAGE_KEY)
@@ -178,6 +193,9 @@ function renderView() {
       setAutostart: setAutostartSetting,
       getAlwaysOnTop: getAlwaysOnTopSetting,
       setAlwaysOnTop: setAlwaysOnTopSetting,
+      getCodexBinaryPath: getCodexBinaryPathSetting,
+      setCodexBinaryPath: setCodexBinaryPathSetting,
+      clearCodexBinaryPath: clearCodexBinaryPathSetting,
     })
     settingsView.setLanguage(getLanguage())
     scheduleSettingsResize()
