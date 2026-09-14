@@ -127,7 +127,7 @@ Windows and Apple Silicon macOS releases are built by GitHub Actions. Windows pu
 3. Start Codex, then start Codex QuotaOrb.
 4. Open **Pair** in the details page, scan or copy the LAN address, and enter the four-digit code on a phone connected to the same Wi‑Fi.
 
-The current stable release is [v1.0.2](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2). Older releases remain available and are not overwritten.
+The current stable release is [v1.0.3](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.3). Older releases remain available and are not overwritten.
 
 ## How it works
 
