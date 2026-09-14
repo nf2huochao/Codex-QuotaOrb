@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">下载 Windows / Apple Silicon Mac 版</a> ·
-  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2">v1.0.2 发行版</a> ·
+  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.3">v1.0.3 发行版</a> ·
   <a href="LICENSE">MIT 许可证</a>
 </p>
 
@@ -47,6 +47,15 @@ Codex 工作时会产生很多有用状态，但额度、重置时间和任务�
 <p align="center"><img src="docs/images/zh/settings.png" alt="Codex 额度悬浮窗设置页" width="620"></p>
 
 设置页集中提供主题、开机自启、始终置顶、更新、仓库和联系入口。
+
+## v1.0.3 本次更新
+
+- 增加 Codex 路径自动检测和手动指定，Windows 优先使用当前 npm 安装版本。
+- Codex 用量接口超时时仍保留最新额度显示，旧用量保留并自动重试。
+- 错误提示区分超时、网络、登录和协议问题。
+- 增加 Apple Silicon macOS `.app` 和 `.dmg` 测试包，共用额度、重置预测、配对和手机网页体验。
+- 发布带签名的 Windows 安装包，以及 `latest.json` 和 `.sig` 更新签名；“检查更新”现在直接使用 GitHub 发行版清单。
+- macOS 测试包暂未签名和公证，首次打开时可能需要在“系统设置 → 隐私与安全性”中允许。
 
 ## v1.0.2 本次更新
 
