@@ -2,6 +2,8 @@
 
 [中文说明 / Chinese README](README.zh-CN.md)
 
+<p align="center"><img src="docs/images/hero-banner.png" alt="Codex QuotaOrb overview" width="1100"></p>
+
 <p align="center"><strong>A quiet, local-first companion for watching Codex quota and task progress.</strong></p>
 
 <p align="center">

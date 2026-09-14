@@ -2,6 +2,8 @@
 
 [English README](README.md)
 
+<p align="center"><img src="docs/images/hero-banner.png" alt="Codex 额度悬浮窗总览" width="1100"></p>
+
 <p align="center"><strong>安静、离线优先的 Codex 额度与任务状态伴侣。</strong></p>
 
 <p align="center">
