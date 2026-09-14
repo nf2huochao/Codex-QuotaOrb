@@ -53,6 +53,9 @@ The settings page keeps theme, startup, always-on-top, update, repository, and c
 - Added automatic and user-selected Codex executable paths, with Windows preference for the current npm installation.
 - Quota data remains usable when the Codex usage endpoint times out; usage values are retained and retried.
 - Improved diagnostics distinguish timeout, network, login, and protocol failures.
+- Added Apple Silicon macOS `.app` and `.dmg` test packages that share the quota, forecast, pairing, and mobile web experience.
+- Published a signed Windows installer together with `latest.json` and the `.sig` updater signature; **Check for updates** now uses the GitHub release manifest.
+- The macOS test package is unsigned and not notarized yet, so macOS may require allowing it in **System Settings → Privacy & Security**.
 
 ## What's new in v1.0.2
 
