@@ -127,7 +127,7 @@ Windows 和 Apple Silicon macOS 发行流程由 GitHub Actions 构建。Windows 
 3. 启动 Codex，再启动 Codex 额度悬浮窗。
 4. 在详情页打开“配对”，复制或扫描局域网地址，在同一 Wi‑Fi 的手机上输入四位配对码。
 
-当前稳定版是 [v1.0.2](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2)，旧版本仍保留，不会被覆盖。
+当前稳定版是 [v1.0.3](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.3)，旧版本仍保留，不会被覆盖。
 
 ## 工作方式
 
