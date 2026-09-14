@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">Download for Windows / macOS Apple Silicon</a> ·
-  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.2">v1.0.2 release</a> ·
+  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.3">v1.0.3 release</a> ·
   <a href="LICENSE">MIT License</a>
 </p>
 
@@ -47,6 +47,15 @@ Double-click the orb to cycle through the orb, capsule, and details views.
 <p align="center"><img src="docs/images/en/settings.png" alt="Codex QuotaOrb settings page" width="620"></p>
 
 The settings page keeps theme, startup, always-on-top, update, repository, and contact controls together.
+
+## What's new in v1.0.3
+
+- Added automatic and user-selected Codex executable paths, with Windows preference for the current npm installation.
+- Quota data remains usable when the Codex usage endpoint times out; usage values are retained and retried.
+- Improved diagnostics distinguish timeout, network, login, and protocol failures.
+- Added Apple Silicon macOS `.app` and `.dmg` test packages that share the quota, forecast, pairing, and mobile web experience.
+- Published a signed Windows installer together with `latest.json` and the `.sig` updater signature; **Check for updates** now uses the GitHub release manifest.
+- The macOS test package is unsigned and not notarized yet, so macOS may require allowing it in **System Settings → Privacy & Security**.
 
 ## What's new in v1.0.2
 
