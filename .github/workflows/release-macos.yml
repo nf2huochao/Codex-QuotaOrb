@@ -9,7 +9,7 @@ on:
       tag_name:
         description: "Existing release tag to receive the macOS test package"
         required: true
-        default: "v1.0.3"
+        default: "v1.0.4"
 
 permissions:
   contents: write
@@ -17,6 +17,9 @@ permissions:
 jobs:
   release-macos:
     runs-on: macos-14
+    concurrency:
+      group: quotaorb-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+      cancel-in-progress: false
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -53,9 +56,14 @@ jobs:
           releaseBody: |
             ## 本次更新 / Release notes
 
-            - Added an Apple Silicon macOS `.app` and `.dmg` test package.
-            - macOS uses the shared quota, trend, forecast, pairing, and mobile web UI.
-            - This first macOS package is unsigned/not notarized and may require allowing the app in System Settings.
+            - 修复部分对话状态漏读、额度刷新覆盖任务状态及旧记录误判运行中的问题。
+            - 改进 Pro 额度兼容、Codex 升级后的重连、手机重新配对和英文显示。
+            - 软件更新先展示可用版本，经用户确认后安装。
+            - Improved task-state reliability, Pro quota compatibility, Codex reconnection, phone pairing, and English display.
+            - Update checks now show the available version and ask before installing.
+            - Windows includes a signed installer and updater files. The Apple Silicon macOS package remains an unsigned test build.
+
+            详细说明见仓库中的 CHANGELOG.md。
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: false

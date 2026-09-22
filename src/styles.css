@@ -52,8 +52,11 @@ button { font:inherit; }
 .detail-grid { display:grid; min-width:0; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin:18px 0 14px; }
 .detail-grid>div { min-width:0; overflow:hidden; padding:11px; border-radius:15px; background:rgba(255,255,255,.2); box-shadow:var(--shadow-in); }
 .detail-grid strong { display:block; min-width:0; margin-top:5px; overflow:hidden; font-size:14px; white-space:nowrap; text-overflow:ellipsis; }
-.freshness { min-width:0; margin:10px 0 16px; font-size:12px; color:#75806f; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.freshness { min-width:0; margin:10px 0 16px; font-size:12px; color:#75806f; white-space:normal; overflow-wrap:anywhere; line-height:1.6; }
 .freshness.stale,.freshness.error,.freshness.unauthenticated { color:#aa665b; }
+.details-panel,.settings-panel { max-height:calc(100vh - 28px); overflow-y:auto!important; scrollbar-width:thin; }
+.task-copy .task-reason { white-space:normal; overflow-wrap:anywhere; }
+button:focus-visible,a:focus-visible,input:focus-visible { outline:2px solid currentColor; outline-offset:3px; }
 .reset-forecast-card { margin:10px 0 16px; padding:11px 12px; border-radius:15px; background:rgba(230,223,208,.7); box-shadow:var(--shadow-in); }
 .reset-forecast-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; color:#66745f; }
 .reset-forecast-head strong { margin:0; font-size:13px; }

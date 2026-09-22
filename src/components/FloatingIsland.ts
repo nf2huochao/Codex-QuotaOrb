@@ -1,5 +1,6 @@
 import { Snapshot, STATUS_COLOR, TaskStatus, taskStatusCounts } from '../domain'
 import { Language, getLanguage, t } from '../i18n'
+import { formatTokens } from '../presentation'
 
 export interface MountedView {
   update(snapshot: Snapshot): void
@@ -10,17 +11,6 @@ export interface MountedView {
 
 function statusLabel(status: TaskStatus, language: Language) {
   return { none: t('noActiveTasks', language), needs_action: t('needsAction', language), running: t('running', language), completed: t('readyForReview', language) }[status]
-}
-
-function formatTokens(tokens?: number) {
-  if (tokens === undefined) return '--'
-  if (tokens < 10_000) return String(tokens)
-  if (tokens >= 100_000_000) {
-    const value = tokens / 100_000_000
-    return `${Number(value.toFixed(tokens >= 1_000_000_000 ? 0 : 1))}亿`
-  }
-  const value = tokens / 10_000
-  return `${Number(value.toFixed(tokens >= 1_000_000 ? 0 : 1))}万`
 }
 
 function tokenLabel(snapshot: Snapshot) {
@@ -43,6 +33,9 @@ function drawQuotaRing(ring: HTMLElement, percent?: number) {
 }
 
 function wireDoubleClickOrDrag(button: HTMLButtonElement, onDoubleClick: () => void) {
+  button.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onDoubleClick() }
+  })
   let startX = 0
   let startY = 0
   let moved = false
@@ -178,7 +171,7 @@ export function mountFloatingIsland(root: HTMLElement, onOpen: () => void): Moun
       taskCopy.textContent = summary.taskCount ? t('taskStatus', language) : t('noActiveTasks', language)
       renderTaskStatusCounts(taskCounts, snapshot, language)
       tokenLabelNode.textContent = tokenLabel(snapshot)
-      tokenCopy.textContent = formatTokens(snapshot.todayTokens)
+      tokenCopy.textContent = formatTokens(snapshot.todayTokens, language)
       drawQuotaRing(ring, percent)
     },
     setLanguage(value) { language = value; if (currentSnapshot) this.update(currentSnapshot) },

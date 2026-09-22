@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">Download for Windows / macOS Apple Silicon</a> ·
-  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.3">v1.0.3 release</a> ·
+  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.4">v1.0.4 release</a> ·
   <a href="LICENSE">MIT License</a>
 </p>
 
@@ -49,6 +49,14 @@ Double-click the orb to cycle through the orb, capsule, and details views.
 <p align="center"><img src="docs/images/en/settings.png" alt="Codex QuotaOrb settings page" width="620"></p>
 
 The settings page keeps theme, startup, always-on-top, update, repository, and contact controls together.
+
+## What's new in v1.0.4
+
+- More reliable task discovery and status updates, including session files whose modification time does not change and records written in parts.
+- Quota refreshes no longer roll back newer task states; silent tasks are marked as unconfirmed rather than assumed complete.
+- Better Pro quota compatibility, clearer service errors, and automatic rediscovery of Codex after an upgrade.
+- Improved phone re-pairing and refresh feedback, English mobile layout, and pairing security.
+- App updates now show the new version and ask before installing. See [the changelog](CHANGELOG.md) for details.
 
 ## What's new in v1.0.3
 
@@ -129,7 +137,7 @@ Windows and Apple Silicon macOS releases are built by GitHub Actions. Windows pu
 3. Start Codex, then start Codex QuotaOrb.
 4. Open **Pair** in the details page, scan or copy the LAN address, and enter the four-digit code on a phone connected to the same Wi‑Fi.
 
-The current stable release is [v1.0.3](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.3). Older releases remain available and are not overwritten.
+The current stable release is [v1.0.4](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.4). Older releases remain available and are not overwritten.
 
 ## How it works
 

@@ -121,9 +121,6 @@ impl TaskRegistry {
     pub fn merge_sources(&mut self, incoming: Vec<TaskSummary>, now: i64) {
         for candidate in incoming {
             if let Some(task) = self.tasks.iter_mut().find(|task| task.id == candidate.id) {
-                let keep_approval = task.status == TaskStatus::NeedsAction
-                    && candidate.status != TaskStatus::NeedsAction
-                    && task.approval_request_id.is_some();
                 let candidate_is_newer = candidate.updated_at >= task.updated_at;
                 let candidate_is_new_turn = candidate.turn_id.is_some()
                     && task.turn_id.is_some()
@@ -133,9 +130,18 @@ impl TaskRegistry {
                 let task_rank = source_rank(task.source.as_deref());
                 let candidate_is_authoritative = candidate_rank > task_rank
                     || (candidate_rank == task_rank && candidate_is_newer)
+                    || (candidate.source.as_deref() == Some("local-session")
+                        && candidate.updated_at > task.updated_at
+                        && (candidate.turn_id == task.turn_id || task.turn_id.is_none()))
                     || candidate_is_new_turn;
+                let keep_approval = task.status == TaskStatus::NeedsAction
+                    && candidate.status != TaskStatus::NeedsAction
+                    && task.approval_request_id.is_some()
+                    && !candidate_is_new_turn
+                    && !(candidate_is_authoritative && candidate.status == TaskStatus::Completed);
                 if !keep_approval
-                    && candidate.status != TaskStatus::None
+                    && (candidate.status != TaskStatus::None
+                        || candidate.source.as_deref() == Some("local-session"))
                     && candidate_is_authoritative
                 {
                     task.status = candidate.status;
@@ -151,6 +157,10 @@ impl TaskRegistry {
                 task.token_count = candidate.token_count.or(task.token_count);
                 task.updated_at = task.updated_at.max(candidate.updated_at);
                 if candidate_is_authoritative {
+                    if !keep_approval && candidate.status != TaskStatus::NeedsAction {
+                        task.waiting_reason = None;
+                        task.approval_request_id = None;
+                    }
                     task.source = candidate.source.or(task.source.clone());
                     task.turn_id = candidate.turn_id.or(task.turn_id.clone());
                 }
@@ -162,7 +172,10 @@ impl TaskRegistry {
         self.tasks.retain(|task| {
             let age = now.saturating_sub(task.updated_at);
             match task.status {
-                TaskStatus::NeedsAction | TaskStatus::Running => {
+                TaskStatus::NeedsAction => {
+                    age <= COMPLETED_KEEP_SECONDS || task.approval_request_id.is_some()
+                }
+                TaskStatus::Running => {
                     matches!(
                         task.source.as_deref(),
                         Some("desktop-state" | "desktop-accessibility")
@@ -170,7 +183,12 @@ impl TaskRegistry {
                         || task.approval_request_id.is_some()
                 }
                 TaskStatus::Completed => age <= COMPLETED_KEEP_SECONDS,
-                TaskStatus::None => task.approval_request_id.is_some(),
+                TaskStatus::None => {
+                    task.approval_request_id.is_some()
+                        || (task.source.as_deref() == Some("local-session")
+                            && task.activity.is_some()
+                            && age <= COMPLETED_KEEP_SECONDS)
+                }
             }
         });
     }
@@ -184,6 +202,7 @@ impl TaskRegistry {
             task.source.as_deref() != Some(source)
                 || incoming_ids.contains(&task.id)
                 || task.status == TaskStatus::Completed
+                || now.saturating_sub(task.received_at) <= 5
         });
         self.merge_sources(incoming, now);
     }
@@ -202,6 +221,29 @@ impl TaskRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn newer_local_completion_resolves_hook_and_waiting_survives_a_long_pause() {
+        let mut registry = TaskRegistry::default();
+        let mut hook = task("a", TaskStatus::Running, 100);
+        hook.source = Some("hook".into());
+        hook.turn_id = Some("same-turn".into());
+        registry.merge_sources(vec![hook.clone()], 100);
+        let mut completion = hook;
+        completion.source = Some("local-session".into());
+        completion.status = TaskStatus::Completed;
+        completion.updated_at = 200;
+        registry.merge_sources(vec![completion], 200);
+        assert_eq!(registry.tasks()[0].status, TaskStatus::Completed);
+        let mut waiting = task("b", TaskStatus::NeedsAction, 100);
+        waiting.source = Some("local-session".into());
+        waiting.approval_request_id = None;
+        registry.merge_sources(vec![waiting], 2000);
+        assert!(registry
+            .tasks()
+            .iter()
+            .any(|task| task.id == "b" && task.status == TaskStatus::NeedsAction));
+    }
 
     fn event(
         id: &str,
@@ -273,12 +315,14 @@ mod tests {
     }
 
     #[test]
-    fn local_scan_removes_a_missing_phantom_task() {
+    fn local_scan_retains_a_transient_miss_then_expires_it() {
         let mut registry = TaskRegistry::default();
         let mut current = task("a", TaskStatus::Running, 100);
         current.source = Some("local-session".into());
         registry.merge_sources(vec![current], 100);
         registry.replace_source_tasks("local-session", Vec::new(), 101);
+        assert_eq!(registry.tasks().len(), 1);
+        registry.replace_source_tasks("local-session", Vec::new(), 106);
         assert!(registry.tasks().is_empty());
     }
 

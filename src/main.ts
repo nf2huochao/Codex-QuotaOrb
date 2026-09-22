@@ -138,14 +138,28 @@ function restoreAlwaysOnTopSetting() {
   if (saved !== null) void invoke('set_always_on_top', { enabled: saved === 'true' }).catch(() => undefined)
 }
 
+let checkingUpdates = false
 async function runUpdateCheck() {
+  if (checkingUpdates) return
+  checkingUpdates = true
   try {
-    const result = await invoke<{ message: string; available: boolean }>('check_for_updates')
-    window.alert(result.message)
-    if (result.available) await invoke('relaunch_app')
+    const result = await invoke<{ message: string; available: boolean; latest_version: string | null }>('check_for_updates')
+    const english = getLanguage() === 'en-US'
+    if (!result.available) {
+      window.alert(english ? 'You are up to date.' : result.message)
+      return
+    }
+    const confirmed = window.confirm(english
+      ? `Version ${result.latest_version} is available. Download and install now? The app will restart.`
+      : `发现新版本 ${result.latest_version}，现在下载并安装吗？安装完成后悬浮窗会重启。`)
+    if (!confirmed) return
+    await invoke('install_update', { expectedVersion: result.latest_version })
+    await invoke('relaunch_app')
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     window.alert(`${t('updateCheckFailed')}：${message}`)
+  } finally {
+    checkingUpdates = false
   }
 }
 
@@ -159,7 +173,7 @@ function renderView() {
     detailsRoot.hidden = false
     settingsRoot.hidden = true
     if (!detailsView) {
-        detailsView = mountDetailsPanel(detailsRoot, refresh, acknowledge, () => { viewState = 'summary'; renderView() }, pairingInfo, () => { viewState = 'ball'; renderView() }, pairingSettingsOpen, () => {
+        detailsView = mountDetailsPanel(detailsRoot, () => refresh(true), acknowledge, () => { viewState = 'summary'; renderView() }, pairingInfo, () => { viewState = 'ball'; renderView() }, pairingSettingsOpen, () => {
         pairingSettingsOpen = !pairingSettingsOpen
         detailsView?.setPairingSettingsOpen(pairingSettingsOpen)
         scheduleDetailsResize()
@@ -240,40 +254,44 @@ function queueSnapshot(input: unknown) {
   }, 150)
 }
 
-async function refresh(): Promise<boolean> {
+async function refresh(manual = false): Promise<boolean> {
   if (designPreview || refreshing) return false
   refreshing = true
-  activeView()?.setRefreshing(true)
+  if (manual) activeView()?.setRefreshing(true)
+  let timeoutId: number | undefined
   if (!pairingInfo) {
     try { pairingInfo = await invoke<typeof pairingInfo>('get_pairing_info') } catch { /* web preview */ }
+    detailsView?.setPairingInfo(pairingInfo)
   }
   try {
     const refreshed = await Promise.race([
       invoke<unknown>('refresh_now'),
-      new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error('refresh-timeout')), REFRESH_TIMEOUT_MS)),
+      new Promise<never>((_, reject) => { timeoutId = window.setTimeout(() => reject(new Error('refresh-timeout')), REFRESH_TIMEOUT_MS) }),
     ])
     applySnapshot(normalizeSnapshot(refreshed))
     retryDelay = 1500
     if (retryTimer !== undefined) { window.clearTimeout(retryTimer); retryTimer = undefined }
   } catch (error) {
-    try { applySnapshot(normalizeSnapshot(await invoke<unknown>('get_snapshot'))) } catch {
-      const timedOut = error instanceof Error && error.message === 'refresh-timeout'
-      applySnapshot({ ...snapshot, status: snapshot.status === 'fresh' ? 'error' : snapshot.status, error: timedOut ? '同步数据超时，请稍后重试' : '桌面端尚未连接 Codex app-server' })
-    }
+    try { applySnapshot(normalizeSnapshot(await invoke<unknown>('get_snapshot'))) } catch { /* retain the last readable snapshot */ }
+    const timedOut = error instanceof Error && error.message === 'refresh-timeout'
+    applySnapshot({ ...snapshot, status: snapshot.fetchedAt ? 'stale' : 'error', error: timedOut ? '同步数据超时，请稍后重试' : '本次刷新失败，保留上次数据' })
     if (retryTimer === undefined && snapshot.status !== 'fresh') {
       retryTimer = window.setTimeout(() => { retryTimer = undefined; void refresh() }, retryDelay)
       retryDelay = Math.min(retryDelay * 2, 30_000)
     }
   }
+  if (timeoutId !== undefined) window.clearTimeout(timeoutId)
   refreshing = false
-  activeView()?.setRefreshing(false)
+  if (manual) activeView()?.setRefreshing(false)
   return snapshot.status === 'fresh'
 }
 
 async function acknowledge(taskId: string) {
-  try { await invoke('acknowledge_task', { taskId }) } catch {
-    const task = snapshot.tasks.find((item) => item.id === taskId)
-    if (task) applySnapshot({ ...snapshot, tasks: snapshot.tasks.map((item) => item.id === taskId ? { ...item, acknowledged: true } : item) })
+  try {
+    if (!await invoke<boolean>('acknowledge_task', { taskId })) throw new Error('not-completed')
+    applySnapshot(normalizeSnapshot(await invoke('get_snapshot')))
+  } catch {
+    window.alert(getLanguage() === 'en-US' ? 'Could not mark this task as reviewed. Check its current status and try again.' : '未能标记已验收，请确认任务当前状态后重试。')
   }
 }
 

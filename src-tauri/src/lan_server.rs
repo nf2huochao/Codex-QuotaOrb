@@ -14,8 +14,8 @@ use std::{
     fs,
     net::SocketAddr,
     path::Path as FsPath,
-    sync::{Arc, RwLock},
-    time::Duration,
+    sync::{Arc, Mutex, RwLock},
+    time::{Duration, Instant},
 };
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -28,6 +28,23 @@ pub struct LanState {
     pub client: Arc<AsyncMutex<Option<Arc<CodexClient>>>>,
     pub hook_bridge: HookBridge,
     pub refresh_lock: Arc<AsyncMutex<()>>,
+    pair_attempts: Arc<Mutex<PairAttempts>>,
+}
+
+struct PairAttempts {
+    window_started: Instant,
+    failures: u8,
+}
+
+impl PairAttempts {
+    fn failed(&mut self) -> bool {
+        if self.window_started.elapsed() >= Duration::from_secs(60) {
+            self.window_started = Instant::now();
+            self.failures = 0;
+        }
+        self.failures = self.failures.saturating_add(1);
+        self.failures > 5
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -253,6 +270,10 @@ pub fn router(
             client,
             hook_bridge,
             refresh_lock: Arc::new(AsyncMutex::new(())),
+            pair_attempts: Arc::new(Mutex::new(PairAttempts {
+                window_started: Instant::now(),
+                failures: 0,
+            })),
         })
 }
 
@@ -287,6 +308,14 @@ fn authorized(headers: &HeaderMap, query: &PairQuery, pairing: &PairingState) ->
 async fn pair(State(state): State<LanState>, Json(request): Json<PairRequest>) -> Response {
     let pairing = state.pairing.read().expect("pairing lock").clone();
     if request.code.trim() != pairing.code {
+        if state
+            .pair_attempts
+            .lock()
+            .expect("pair attempts lock")
+            .failed()
+        {
+            return (StatusCode::TOO_MANY_REQUESTS, "尝试次数过多，请稍后重试").into_response();
+        }
         return (StatusCode::UNAUTHORIZED, "配对码不正确").into_response();
     }
     (
@@ -364,7 +393,7 @@ async fn manual_refresh(
     .await;
     match result {
         Ok(mut refreshed) => {
-            refreshed.changed_at = Some(refreshed_at);
+            refreshed.changed_at = Some(now());
             refreshed.source = Some("manual-refresh".into());
             (
                 [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
@@ -386,7 +415,10 @@ async fn acknowledge(
     if !authorized(&headers, &query, &pairing) {
         return (StatusCode::UNAUTHORIZED, "需要局域网配对码").into_response();
     }
-    Json(serde_json::json!({ "acknowledged": state.store.acknowledge(&id) })).into_response()
+    if !state.store.acknowledge(&id) {
+        return (StatusCode::CONFLICT, "任务状态已变化，请刷新后重试").into_response();
+    }
+    Json(serde_json::json!({ "acknowledged": true })).into_response()
 }
 
 async fn approval(
@@ -498,41 +530,41 @@ async fn permission_hook(
         "等待批准：{} · {} · {} · turn {}",
         input.tool_name, input.permission_mode, input.model, input.turn_id
     );
-    let mut snapshot = state.store.current();
-    if let Some(task) = snapshot
-        .tasks
-        .iter_mut()
-        .find(|task| task.id == input.session_id)
-    {
-        task.status = crate::domain::TaskStatus::NeedsAction;
-        task.waiting_reason = Some(reason);
-        task.approval_request_id = Some(request_id.clone());
-        task.updated_at = now();
-        task.source = Some("hook".into());
-        task.turn_id = Some(input.turn_id.clone());
-        task.received_at = now();
-    } else {
-        snapshot.tasks.push(crate::domain::TaskSummary {
-            id: input.session_id.clone(),
-            title: format!(
-                "Codex 会话 {}",
-                &input.session_id[..input.session_id.len().min(8)]
-            ),
-            activity: None,
-            waiting_reason: Some(reason),
-            approval_request_id: Some(request_id.clone()),
-            status: crate::domain::TaskStatus::NeedsAction,
-            token_count: None,
-            updated_at: now(),
-            acknowledged: false,
-            source: Some("hook".into()),
-            turn_id: Some(input.turn_id.clone()),
-            received_at: now(),
-        });
-    }
-    snapshot.changed_at = Some(now());
-    snapshot.source = Some("permission-hook".into());
-    state.store.publish_if_changed(snapshot);
+    state.store.update(|snapshot| {
+        if let Some(task) = snapshot
+            .tasks
+            .iter_mut()
+            .find(|task| task.id == input.session_id)
+        {
+            task.status = crate::domain::TaskStatus::NeedsAction;
+            task.waiting_reason = Some(reason);
+            task.approval_request_id = Some(request_id.clone());
+            task.updated_at = now();
+            task.source = Some("hook".into());
+            task.turn_id = Some(input.turn_id.clone());
+            task.received_at = now();
+        } else {
+            snapshot.tasks.push(crate::domain::TaskSummary {
+                id: input.session_id.clone(),
+                title: format!(
+                    "Codex 会话 {}",
+                    input.session_id.chars().take(8).collect::<String>()
+                ),
+                activity: None,
+                waiting_reason: Some(reason),
+                approval_request_id: Some(request_id.clone()),
+                status: crate::domain::TaskStatus::NeedsAction,
+                token_count: None,
+                updated_at: now(),
+                acknowledged: false,
+                source: Some("hook".into()),
+                turn_id: Some(input.turn_id.clone()),
+                received_at: now(),
+            });
+        }
+        snapshot.changed_at = Some(now());
+        snapshot.source = Some("permission-hook".into());
+    });
     let decision = match tokio::time::timeout(std::time::Duration::from_secs(300), receiver).await {
         Ok(Ok(decision)) => decision,
         _ => {
@@ -596,7 +628,6 @@ async fn lifecycle_hook(
         }
     };
     let now = now();
-    let mut snapshot = state.store.current();
     let status = match input.event_name.as_str() {
         "UserPromptSubmit" => crate::domain::TaskStatus::Running,
         "Stop" => crate::domain::TaskStatus::Completed,
@@ -627,65 +658,68 @@ async fn lifecycle_hook(
             true,
             None,
         ));
-    if let Some(task) = snapshot
-        .tasks
-        .iter_mut()
-        .find(|task| task.id == input.session_id)
-    {
-        let stale_stop = input.event_name == "Stop"
-            && input.turn_id.is_some()
-            && task.turn_id.is_some()
-            && input.turn_id != task.turn_id;
-        if stale_stop {
-            snapshot.changed_at = Some(now);
-            snapshot.source = Some("lifecycle-hook-stale".into());
-            state.store.publish_if_changed(snapshot);
-            return Json(serde_json::json!({"accepted": true, "ignored": "stale_turn"}))
-                .into_response();
-        }
-        if status == crate::domain::TaskStatus::None
-            && task.status == crate::domain::TaskStatus::NeedsAction
-            && task.approval_request_id.is_some()
+    let mut ignored_stale_turn = false;
+    state.store.update(|snapshot| {
+        if let Some(task) = snapshot
+            .tasks
+            .iter_mut()
+            .find(|task| task.id == input.session_id)
         {
-            // SessionEnd cannot resolve a live approval request.
-        } else {
-            task.status = status;
-            if status != crate::domain::TaskStatus::NeedsAction {
-                task.waiting_reason = None;
-                task.approval_request_id = None;
+            let stale_stop = input.event_name == "Stop"
+                && input.turn_id.is_some()
+                && task.turn_id.is_some()
+                && input.turn_id != task.turn_id;
+            if stale_stop {
+                ignored_stale_turn = true;
+                return;
             }
+            if status == crate::domain::TaskStatus::None
+                && task.status == crate::domain::TaskStatus::NeedsAction
+                && task.approval_request_id.is_some()
+            {
+                // SessionEnd cannot resolve a live approval request.
+            } else {
+                task.status = status;
+                if status != crate::domain::TaskStatus::NeedsAction {
+                    task.waiting_reason = None;
+                    task.approval_request_id = None;
+                }
+            }
+            if let Some(title) = input.title {
+                task.title = title;
+            }
+            if input.activity.is_some() {
+                task.activity = input.activity;
+            }
+            task.source = Some("hook".into());
+            if input.turn_id.is_some() {
+                task.turn_id = input.turn_id.clone();
+            }
+            task.received_at = now;
+            task.updated_at = now;
+        } else {
+            snapshot.tasks.push(crate::domain::TaskSummary {
+                id: input.session_id,
+                title: input.title.unwrap_or_else(|| "Codex 对话".into()),
+                activity: input.activity,
+                waiting_reason: None,
+                approval_request_id: None,
+                status,
+                token_count: None,
+                updated_at: now,
+                acknowledged: false,
+                source: Some("hook".into()),
+                turn_id: input.turn_id.clone(),
+                received_at: now,
+            });
         }
-        if let Some(title) = input.title {
-            task.title = title;
-        }
-        if input.activity.is_some() {
-            task.activity = input.activity;
-        }
-        task.source = Some("hook".into());
-        if input.turn_id.is_some() {
-            task.turn_id = input.turn_id.clone();
-        }
-        task.received_at = now;
-        task.updated_at = now;
-    } else {
-        snapshot.tasks.push(crate::domain::TaskSummary {
-            id: input.session_id,
-            title: input.title.unwrap_or_else(|| "Codex 对话".into()),
-            activity: input.activity,
-            waiting_reason: None,
-            approval_request_id: None,
-            status,
-            token_count: None,
-            updated_at: now,
-            acknowledged: false,
-            source: Some("hook".into()),
-            turn_id: input.turn_id.clone(),
-            received_at: now,
-        });
+        snapshot.changed_at = Some(now);
+        snapshot.source = Some("lifecycle-hook".into());
+    });
+    if ignored_stale_turn {
+        return Json(serde_json::json!({"accepted": true, "ignored": "stale_turn"}))
+            .into_response();
     }
-    snapshot.changed_at = Some(now);
-    snapshot.source = Some("lifecycle-hook".into());
-    state.store.publish_if_changed(snapshot);
     Json(serde_json::json!({"accepted": true})).into_response()
 }
 
@@ -706,12 +740,21 @@ async fn websocket(
     if !authorized(&headers, &query, &pairing) {
         return (StatusCode::UNAUTHORIZED, "需要局域网配对码").into_response();
     }
-    ws.on_upgrade(move |socket| send_snapshots(socket, state.store))
-        .into_response()
+    ws.on_upgrade(move |socket| {
+        send_snapshots(socket, state.store, state.pairing, pairing.session_token)
+    })
+    .into_response()
 }
 
-async fn send_snapshots(mut socket: WebSocket, store: SnapshotStore) {
+async fn send_snapshots(
+    mut socket: WebSocket,
+    store: SnapshotStore,
+    pairing: Arc<RwLock<PairingState>>,
+    session_token: String,
+) {
     let mut receiver = store.subscribe();
+    let mut pairing_check = tokio::time::interval(Duration::from_secs(5));
+    pairing_check.tick().await;
     let _ = futures_util::SinkExt::send(
         &mut socket,
         Message::Text(
@@ -721,7 +764,25 @@ async fn send_snapshots(mut socket: WebSocket, store: SnapshotStore) {
         ),
     )
     .await;
-    while receiver.changed().await.is_ok() {
+    loop {
+        let changed = tokio::select! {
+            result = receiver.changed() => { if result.is_err() { break; } true }
+            _ = pairing_check.tick() => false
+        };
+        if pairing.read().expect("pairing lock").session_token != session_token {
+            let _ = futures_util::SinkExt::send(
+                &mut socket,
+                Message::Close(Some(axum::extract::ws::CloseFrame {
+                    code: axum::extract::ws::close_code::POLICY,
+                    reason: "pairing expired".into(),
+                })),
+            )
+            .await;
+            break;
+        }
+        if !changed {
+            continue;
+        }
         let payload = match serde_json::to_string(&receiver.borrow().clone()) {
             Ok(payload) => payload,
             Err(_) => continue,
@@ -879,6 +940,50 @@ mod tests {
             serde_json::from_slice::<PairResponse>(&body).unwrap().token,
             "secret"
         );
+    }
+
+    #[tokio::test]
+    async fn repeated_bad_pairing_attempts_are_throttled_without_locking_out_the_real_code() {
+        let pairing = Arc::new(RwLock::new(PairingState {
+            code: "1234".into(),
+            session_token: "secret".into(),
+        }));
+        let app = router(
+            store(),
+            pairing,
+            Arc::new(AsyncMutex::new(None)),
+            HookBridge::default(),
+        );
+        for attempt in 1..=6 {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post("/api/pair")
+                        .header("content-type", "application/json")
+                        .body(Body::from(r#"{"code":"9999"}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if attempt <= 5 {
+                    StatusCode::UNAUTHORIZED
+                } else {
+                    StatusCode::TOO_MANY_REQUESTS
+                }
+            );
+        }
+        let response = app
+            .oneshot(
+                Request::post("/api/pair")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"code":"1234"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]

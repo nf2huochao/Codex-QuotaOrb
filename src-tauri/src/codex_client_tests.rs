@@ -3,6 +3,16 @@ mod tests {
     use super::super::codex_protocol::*;
 
     #[test]
+    fn parses_pro_bucket_and_fractional_usage_without_inventing_a_five_hour_limit() {
+        let response = parse_rate_limits(r#"{"rateLimits":null,"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":12.5,"windowDurationMins":10080,"resetsAt":1790611029},"secondary":null,"planType":"prolite"}},"rateLimitResetCredits":{"availableCount":2}}"#).unwrap();
+        assert_eq!(response.plan.as_deref(), Some("prolite"));
+        assert_eq!(response.remaining_percent, Some(88));
+        assert_eq!(response.five_hour_remaining_percent, None);
+        assert_eq!(response.reset_credits, Some(2));
+        assert!(parse_rate_limits(r#"{"rateLimits":{"planType":"prolite"}}"#).is_err());
+    }
+
+    #[test]
     fn parses_remaining_percent_and_reset_credit_count() {
         let response = parse_rate_limits(include_str!("../fixtures/rate_limits.json")).unwrap();
         assert_eq!(response.remaining_percent, Some(72));

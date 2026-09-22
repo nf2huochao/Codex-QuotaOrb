@@ -79,18 +79,23 @@ struct ParsedRateLimitWindow {
 
 fn parse_rate_limit_window(value: Option<&Value>) -> Option<ParsedRateLimitWindow> {
     let window = value?;
-    let remaining_percent = as_u64(
+    let remaining_percent = (window
+        .get("remaining_percent")
+        .or_else(|| window.get("remainingPercent")))
+    .and_then(Value::as_f64)
+    .or_else(|| {
         window
-            .get("remaining_percent")
-            .or_else(|| window.get("remainingPercent")),
-    )
-    .or_else(|| as_u64(window.get("usedPercent")).map(|used| 100u64.saturating_sub(used)))
+            .get("usedPercent")
+            .and_then(Value::as_f64)
+            .map(|used| 100.0 - used)
+    })
     .or_else(|| {
         as_u64(window.get("limit"))
             .zip(as_u64(window.get("used")))
-            .map(|(limit, used)| limit.saturating_sub(used) * 100 / limit.max(1))
+            .map(|(limit, used)| limit.saturating_sub(used) as f64 * 100.0 / limit.max(1) as f64)
     })
-    .map(|value| value.min(100) as u8);
+    .filter(|value| value.is_finite())
+    .map(|value| value.clamp(0.0, 100.0).round() as u8);
     let resets_at = as_i64(
         window
             .get("resets_at")
@@ -124,7 +129,13 @@ pub fn parse_rate_limits(input: &str) -> Result<RateLimitResponse, ProtocolError
     let root = payload(serde_json::from_str(input)?);
     let snapshot = root
         .get("rateLimits")
+        .filter(|value| value.is_object())
         .or_else(|| root.get("rate_limits"))
+        .filter(|value| value.is_object())
+        .or_else(|| {
+            root.get("rateLimitsByLimitId")
+                .and_then(|limits| limits.get("codex"))
+        })
         .unwrap_or(&root);
     let primary_value = snapshot
         .get("primary")
@@ -177,7 +188,11 @@ pub fn parse_rate_limits(input: &str) -> Result<RateLimitResponse, ProtocolError
         .map(str::to_owned);
     let reset_credits =
         reset_credits.or_else(|| credits.and_then(|v| as_u64(v.get("availableCount"))));
-    if remaining_percent.is_none() && resets_at.is_none() && plan.is_none() {
+    if remaining_percent.is_none()
+        && resets_at.is_none()
+        && five_hour_remaining_percent.is_none()
+        && five_hour_resets_at.is_none()
+    {
         return Err(ProtocolError::Missing("primary"));
     }
     Ok(RateLimitResponse {

@@ -4,6 +4,20 @@ All notable changes to Codex QuotaOrb are documented here in Chinese and English
 
 Codex 额度悬浮窗的主要新增、改进和修复均在此以中英文记录。
 
+## v1.0.4 — 2026-09-23
+
+### Fixed / 修复
+
+- Task discovery now follows growing session files even when Windows does not update their modification time. Partial records are read only after completion, and old usage records no longer incorrectly mark finished tasks as running. / 即使 Windows 未更新会话文件修改时间，也能持续发现新增对话记录；未写完的记录不会误读，旧用量记录也不会把已完成任务重新标为运行中。
+- Quota refreshes no longer overwrite newer task states. Waiting-for-input and completed states are kept more reliably; when Codex emits no new evidence, the task is shown as unconfirmed instead of being guessed complete. / 额度刷新不再覆盖较新的任务状态；等待输入和完成状态更稳定；Codex 没有新记录时显示状态待确认，不猜测任务已结束。
+- Pro quota responses and service errors are handled more accurately. Unknown service failures are not mislabeled as protocol incompatibility, and the Codex executable is rediscovered after an upgrade. / 更准确处理 Pro 额度响应和服务错误；未知故障不再误报协议不兼容，Codex 升级后会重新寻找程序位置。
+- Fixed phone re-pairing, stale refresh feedback, English number formatting and narrow-screen messages. Pairing attempts are limited, and resetting pairing closes old live connections. / 修复手机重新配对、旧数据误报刷新成功、英文数字及窄屏提示；限制配对码试错次数，重置配对后关闭旧连接。
+- Checking for an app update now shows the available version before installation and asks for confirmation. / 检查软件更新先显示可用版本，用户确认后才安装。
+
+### Verification / 验证
+
+- Local Rust, frontend and browser interaction tests passed. macOS hardware and installed-package behavior have not been verified in this round. / 本地 Rust、前端和浏览器交互测试通过；本轮尚未在 macOS 真机和已安装发行包上验证。
+
 ## v1.0.3 — 2026-09-13
 
 ### Fixed / 修复

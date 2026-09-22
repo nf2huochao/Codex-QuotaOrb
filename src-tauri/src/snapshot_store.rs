@@ -61,8 +61,7 @@ fn trim_history(mut history: Vec<UsagePoint>) -> Vec<UsagePoint> {
 }
 
 fn cycle_start_bucket(cycle_key: Option<i64>) -> Option<i64> {
-    cycle_key
-        .and_then(|key| local_hour_bucket(key - 168 * 3600).map(|(bucket, _)| bucket))
+    cycle_key.and_then(|key| local_hour_bucket(key - 168 * 3600).map(|(bucket, _)| bucket))
 }
 
 fn seed_cycle_baseline(mut history: Vec<UsagePoint>, cycle_key: Option<i64>) -> Vec<UsagePoint> {
@@ -132,8 +131,7 @@ impl SnapshotStore {
         self.state.lock().expect("snapshot lock").clone()
     }
 
-    fn normalize(&self, mut snapshot: Snapshot) -> Snapshot {
-        let previous_snapshot = self.state.lock().expect("snapshot lock").clone();
+    fn normalize(&self, mut snapshot: Snapshot, previous_snapshot: &Snapshot) -> Snapshot {
         let legacy_schema = snapshot.schema_version == "1.0";
         if legacy_schema {
             snapshot.history.clear();
@@ -150,8 +148,8 @@ impl SnapshotStore {
         let previous_cycle_key = previous_snapshot
             .history_cycle_key
             .or_else(|| history_cycle_key(previous_snapshot.quota_resets_at));
-        let detected_cycle_key = incoming_history_cycle_key
-            .or_else(|| history_cycle_key(snapshot.quota_resets_at));
+        let detected_cycle_key =
+            incoming_history_cycle_key.or_else(|| history_cycle_key(snapshot.quota_resets_at));
         let mut current_history = if from_cache && previous_history.is_empty() {
             incoming_history
         } else {
@@ -167,13 +165,12 @@ impl SnapshotStore {
         } else {
             previous_snapshot.previous_history.clone()
         };
-        let mut previous_history_cycle_key = if from_cache
-            && previous_snapshot.previous_history_cycle_key.is_none()
-        {
-            incoming_previous_history_cycle_key
-        } else {
-            previous_snapshot.previous_history_cycle_key
-        };
+        let mut previous_history_cycle_key =
+            if from_cache && previous_snapshot.previous_history_cycle_key.is_none() {
+                incoming_previous_history_cycle_key
+            } else {
+                previous_snapshot.previous_history_cycle_key
+            };
         snapshot.schema_version = crate::domain::SNAPSHOT_SCHEMA_VERSION.into();
         if matches!(
             snapshot.source.as_deref(),
@@ -209,6 +206,9 @@ impl SnapshotStore {
                 if authoritative
                     && same_turn
                     && previous_task.status != crate::domain::TaskStatus::None
+                    && task.source != previous_task.source
+                    && !(task.source.as_deref() == Some("local-session")
+                        && task.updated_at > previous_task.updated_at)
                 {
                     task.status = previous_task.status;
                     task.waiting_reason = previous_task.waiting_reason.clone();
@@ -220,10 +220,25 @@ impl SnapshotStore {
                 }
             }
         }
-        let acknowledged = self.acknowledged.lock().expect("ack lock").clone();
+        let mut acknowledged = self.acknowledged.lock().expect("ack lock");
+        for task in &snapshot.tasks {
+            if previous_snapshot.tasks.iter().any(|previous| {
+                previous.id == task.id
+                    && (task.turn_id.is_some() && previous.turn_id != task.turn_id
+                        || previous.status == crate::domain::TaskStatus::Completed
+                            && matches!(
+                                task.status,
+                                crate::domain::TaskStatus::Running
+                                    | crate::domain::TaskStatus::NeedsAction
+                            ))
+            }) {
+                acknowledged.remove(&task.id);
+            }
+        }
         for task in &mut snapshot.tasks {
             task.acknowledged = acknowledged.contains(&task.id);
         }
+        drop(acknowledged);
         let active = snapshot
             .tasks
             .iter()
@@ -263,21 +278,39 @@ impl SnapshotStore {
     }
 
     pub fn publish(&self, snapshot: Snapshot) {
-        let snapshot = self.normalize(snapshot);
-        *self.state.lock().expect("snapshot lock") = snapshot.clone();
+        let mut current = self.state.lock().expect("snapshot lock");
+        let snapshot = self.normalize(snapshot, &current);
+        *current = snapshot.clone();
         let _ = self.tx.send(snapshot);
     }
 
     pub fn publish_if_changed(&self, snapshot: Snapshot) -> bool {
-        let snapshot = self.normalize(snapshot);
+        self.update(|current| *current = snapshot)
+    }
+
+    /// Modify only the owning subsystem's fields while holding the snapshot
+    /// lock. Slow metrics reads must never publish an old task list.
+    pub fn update(&self, apply: impl FnOnce(&mut Snapshot)) -> bool {
         let mut current = self.state.lock().expect("snapshot lock");
+        let mut snapshot = current.clone();
+        apply(&mut snapshot);
+        let snapshot = self.normalize(snapshot, &current);
         let mut current_content = current.clone();
         current_content.changed_at = None;
         current_content.source = None;
         let mut next_content = snapshot.clone();
         next_content.changed_at = None;
         next_content.source = None;
+        // Observation heartbeats are not visible changes. Still retain them
+        // internally for the short read-failure grace period.
+        for task in &mut current_content.tasks {
+            task.received_at = 0;
+        }
+        for task in &mut next_content.tasks {
+            task.received_at = 0;
+        }
         if current_content == next_content {
+            *current = snapshot;
             return false;
         }
         *current = snapshot.clone();
@@ -432,6 +465,22 @@ mod tests {
     }
 
     #[test]
+    fn newer_local_lifecycle_replaces_hook_without_reverting_the_task() {
+        let mut initial = snapshot();
+        initial.tasks[0].source = Some("hook".into());
+        initial.tasks[0].status = TaskStatus::Running;
+        initial.tasks[0].turn_id = Some("turn".into());
+        let (store, _) = SnapshotStore::new(initial);
+        store.update(|snapshot| {
+            snapshot.source = Some("task-watch".into());
+            snapshot.tasks[0].source = Some("local-session".into());
+            snapshot.tasks[0].status = TaskStatus::Completed;
+            snapshot.tasks[0].updated_at = 2;
+        });
+        assert_eq!(store.current().tasks[0].status, TaskStatus::Completed);
+    }
+
+    #[test]
     fn clears_legacy_history_when_upgrading_to_weekly_history() {
         let mut initial = snapshot();
         initial.schema_version = "1.0".into();
@@ -460,6 +509,30 @@ mod tests {
         next.tasks[0].status = TaskStatus::Running;
         store.publish(next);
         assert!(!store.acknowledge("t"));
+    }
+
+    #[test]
+    fn metrics_update_preserves_new_tasks_and_next_turn_can_be_reviewed() {
+        let (store, _) = SnapshotStore::new(snapshot());
+        assert!(store.acknowledge("t"));
+        store.update(|next| {
+            next.source = Some("local-session".into());
+            next.tasks[0].status = TaskStatus::Running;
+            next.tasks[0].turn_id = Some("next-turn".into());
+            next.tasks[0].source = Some("local-session".into());
+        });
+        store.update(|next| {
+            next.source = Some("metrics-poll".into());
+            next.quota_remaining_percent = Some(60);
+        });
+        assert_eq!(store.current().tasks[0].status, TaskStatus::Running);
+        assert!(!store.current().tasks[0].acknowledged);
+        store.update(|next| {
+            next.tasks[0].status = TaskStatus::Completed;
+        });
+        assert_eq!(store.current().tasks[0].status, TaskStatus::Completed);
+        assert_eq!(store.current().task_counts.completed, 1);
+        assert_eq!(store.current().quota_remaining_percent, Some(60));
     }
 
     #[test]
@@ -583,8 +656,20 @@ mod tests {
         initial.quota_resets_at = Some(now + 168 * 3600);
         let (store, _) = SnapshotStore::new(initial);
         let current = store.current();
-        assert_eq!(current.history.first().and_then(|point| point.quota_remaining_percent), Some(100));
-        assert_eq!(current.history.last().and_then(|point| point.quota_remaining_percent), Some(100));
+        assert_eq!(
+            current
+                .history
+                .first()
+                .and_then(|point| point.quota_remaining_percent),
+            Some(100)
+        );
+        assert_eq!(
+            current
+                .history
+                .last()
+                .and_then(|point| point.quota_remaining_percent),
+            Some(100)
+        );
     }
 
     #[test]
@@ -616,7 +701,10 @@ mod tests {
         assert_eq!(current.history_cycle_key, Some(new_cycle));
         assert_eq!(current.previous_history_cycle_key, Some(old_cycle));
         assert_eq!(current.previous_history.len(), 1);
-        assert_eq!(current.previous_history[0].quota_remaining_percent, Some(72));
+        assert_eq!(
+            current.previous_history[0].quota_remaining_percent,
+            Some(72)
+        );
         assert!(current
             .history
             .iter()

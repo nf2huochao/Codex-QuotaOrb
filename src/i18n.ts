@@ -24,6 +24,8 @@ const COPY: Record<Language, Copy> = {
     running: '执行中',
     readyForReview: '可验收',
     needsApproval: '需要批准 / 回复 / 确认',
+    taskStateUnknown: '状态待确认，请查看 Codex',
+    continueInCodex: '请在 Codex 中批准或回复',
     runningFull: '正在执行',
     completedFull: '已完成，可验收',
     currentActivity: '当前内容',
@@ -158,6 +160,8 @@ const COPY: Record<Language, Copy> = {
     running: 'Running',
     readyForReview: 'Ready for review',
     needsApproval: 'Approval / reply / confirmation needed',
+    taskStateUnknown: 'Status unconfirmed — check Codex',
+    continueInCodex: 'Approve or reply in Codex',
     runningFull: 'Running',
     completedFull: 'Completed, ready for review',
     currentActivity: 'Current activity',
@@ -298,5 +302,9 @@ export function setLanguage(next: Language): Language {
 export function toggleLanguage(): Language { return setLanguage(language === 'zh-CN' ? 'en-US' : 'zh-CN') }
 
 export function t(key: string, selected = language): string {
+  if (typeof navigator !== 'undefined' && /Macintosh|Mac OS X/.test(navigator.userAgent)) {
+    if (key === 'autostart') return selected === 'en-US' ? 'Start with macOS' : '登录 macOS 后启动'
+    if (key === 'autostartHint') return selected === 'en-US' ? 'Launch automatically after macOS sign-in' : '登录 macOS 后自动启动'
+  }
   return COPY[selected][key] ?? COPY['zh-CN'][key] ?? key
 }

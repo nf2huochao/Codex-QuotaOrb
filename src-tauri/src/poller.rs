@@ -22,65 +22,36 @@ const COMPLETED_VISIBLE_SECONDS: i64 = 6 * 60 * 60;
 pub async fn poll_once(
     store: &SnapshotStore,
     client: &CodexClient,
-    previous: &Snapshot,
-    now: i64,
+    _previous: &Snapshot,
+    _now: i64,
 ) -> Snapshot {
-    let rate = client.read_rate_limits().await;
-    let usage = client.read_usage().await;
-    match rate {
-        Ok(rate) => {
-            let rollout_tasks = RolloutWatcher::new(default_root()).scan(now);
-            let mut registry = TaskRegistry::from_tasks(&previous.tasks);
-            registry.merge_sources(rollout_tasks, now);
-            let tasks = registry.tasks();
-            let active_task_count = tasks
-                .iter()
-                .filter(|task| matches!(task.status, TaskStatus::Running | TaskStatus::NeedsAction))
-                .count() as u32;
-            let mut snapshot = Snapshot {
-                status: snapshot_status(Some(now), now, false, true),
-                changed_at: Some(now),
-                source: Some("full-poll".into()),
-                fetched_at: Some(now),
-                quota_remaining_percent: rate.remaining_percent,
-                quota_resets_at: rate.resets_at,
-                five_hour_remaining_percent: rate.five_hour_remaining_percent,
-                five_hour_resets_at: rate.five_hour_resets_at,
-                plan: rate.plan,
-                reset_credits: rate.reset_credits,
-                today_tokens: previous.today_tokens,
-                usage_date: previous.usage_date.clone(),
-                active_task_count,
-                task_counts: registry.counts(),
-                tasks,
-                error: None,
-                history: previous.history.clone(),
-                // SnapshotStore derives the cycle key from this fresh quota
-                // response so a newly published reset boundary is detected.
-                history_cycle_key: None,
-                previous_history: Vec::new(),
-                previous_history_cycle_key: None,
-                hook_diagnostics: previous.hook_diagnostics.clone(),
-                schema_version: crate::domain::SNAPSHOT_SCHEMA_VERSION.into(),
-            };
-            if let Ok(usage) = usage {
-                apply_usage(&mut snapshot, usage);
-            } else {
-                snapshot.error = Some("usage_unavailable".into());
+    // Manual and periodic refreshes share the same ordering boundary.
+    let _metrics_guard = client.metrics_lock.lock().await;
+    let (rate, usage) = tokio::join!(client.read_rate_limits(), client.read_usage());
+    let now = chrono_like_now();
+    store.update(|snapshot| {
+        snapshot.changed_at = Some(now);
+        snapshot.source = Some("metrics-poll".into());
+        match rate {
+            Ok(rate) => {
+                apply_rate_limits(snapshot, rate);
+                snapshot.status = snapshot_status(Some(now), now, false, true);
+                snapshot.fetched_at = Some(now);
+                snapshot.history_cycle_key = None;
+                snapshot.error = None;
+                if let Ok(usage) = usage {
+                    apply_usage(snapshot, usage);
+                } else {
+                    snapshot.error = Some("usage_unavailable".into());
+                }
             }
-            store.publish_if_changed(snapshot.clone());
-            snapshot
+            Err(error) => {
+                snapshot.status = snapshot_status(snapshot.fetched_at, now, true, true);
+                snapshot.error = Some(diagnostics::classify(&error).message().to_owned());
+            }
         }
-        Err(rate_error) => {
-            let mut stale = previous.clone();
-            stale.changed_at = Some(now);
-            stale.source = Some("full-poll".into());
-            stale.status = snapshot_status(previous.fetched_at, now, true, true);
-            stale.error = Some(diagnostics::classify(&rate_error).message().to_owned());
-            store.publish_if_changed(stale.clone());
-            stale
-        }
-    }
+    });
+    store.current()
 }
 
 fn apply_usage(snapshot: &mut Snapshot, usage: UsageResponse) {
@@ -453,36 +424,16 @@ pub fn spawn_poll_loop(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let intervals = SyncIntervals::default();
-        let mut previous = store.current();
         let mut notification_rx = client.subscribe_notifications();
         let mut metrics_tick = tokio::time::interval(intervals.metrics);
-        let mut full_tick = tokio::time::interval(intervals.full);
-        metrics_tick.tick().await;
-        full_tick.tick().await;
+        metrics_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 notification = notification_rx.recv() => {
                     if let Ok(notification) = notification {
-                        let now = chrono_like_now();
                         let method = notification.get("method").and_then(serde_json::Value::as_str).unwrap_or("");
                         if is_metrics_notification(method) {
-                            let rate = client.read_rate_limits().await;
-                            let usage = client.read_usage().await;
-                            if let Ok(rate) = rate {
-                                let mut next = previous.clone();
-                                next.changed_at = Some(now);
-                                next.source = Some("app-server-event".into());
-                                next.status = snapshot_status(Some(now), now, false, client.is_connected());
-                                next.fetched_at = Some(now);
-                                apply_rate_limits(&mut next, rate);
-                                if let Ok(usage) = usage {
-                                    apply_usage(&mut next, usage);
-                                } else {
-                                    next.error = Some("usage_unavailable".into());
-                                }
-                                store.publish_if_changed(next);
-                                previous = store.current();
-                            }
+                            poll_once(&store, &client, &store.current(), chrono_like_now()).await;
                         }
                     } else if matches!(notification, Err(tokio::sync::broadcast::error::RecvError::Closed)) {
                         break;
@@ -490,29 +441,7 @@ pub fn spawn_poll_loop(
                 }
                 _ = metrics_tick.tick() => {
                     if !client.is_connected() { break; }
-                    let now = chrono_like_now();
-                    let rate = client.read_rate_limits().await;
-                    let usage = client.read_usage().await;
-                    if let Ok(rate) = rate {
-                        let mut next = previous.clone();
-                        next.changed_at = Some(now);
-                        next.source = Some("metrics-poll".into());
-                        next.status = snapshot_status(Some(now), now, false, client.is_connected());
-                        next.fetched_at = Some(now);
-                        apply_rate_limits(&mut next, rate);
-                        if let Ok(usage) = usage {
-                            apply_usage(&mut next, usage);
-                        } else {
-                            next.error = Some("usage_unavailable".into());
-                        }
-                        store.publish_if_changed(next.clone());
-                        previous = store.current();
-                    }
-                }
-                _ = full_tick.tick() => {
-                    if !client.is_connected() { break; }
-                    let now = chrono_like_now();
-                    previous = poll_once(&store, &client, &previous, now).await;
+                    poll_once(&store, &client, &store.current(), chrono_like_now()).await;
                 }
             }
         }
@@ -527,36 +456,38 @@ pub fn spawn_local_task_loop(store: SnapshotStore) -> tauri::async_runtime::Join
     tauri::async_runtime::spawn(async move {
         let mut watcher = RolloutWatcher::new(default_root());
         let mut tick = tokio::time::interval(SyncIntervals::default().task);
-        tick.tick().await;
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tick.tick().await;
             let now = chrono_like_now();
-            let previous = store.current();
-            let mut registry = TaskRegistry::from_tasks(&previous.tasks);
-            registry.replace_source_tasks("local-session", watcher.scan(now), now);
-            let mut next = previous.clone();
-            next.tasks = registry.tasks();
-            next.task_counts = registry.counts();
-            next.active_task_count = next.task_counts.needs_action + next.task_counts.running;
-            next.changed_at = Some(now);
-            next.source = Some("local-session".into());
-            store.publish_if_changed(next);
+            let result = tokio::task::spawn_blocking(move || {
+                let tasks = watcher.scan(now);
+                (watcher, tasks)
+            })
+            .await;
+            let Ok((next_watcher, tasks)) = result else {
+                break;
+            };
+            watcher = next_watcher;
+            publish_local_tasks(&store, tasks, now);
         }
     })
 }
 
-pub fn refresh_local_tasks(store: &SnapshotStore, previous: &Snapshot, now: i64) -> Snapshot {
+pub fn refresh_local_tasks(store: &SnapshotStore, _previous: &Snapshot, now: i64) -> Snapshot {
     let mut watcher = RolloutWatcher::new(default_root());
-    let mut registry = TaskRegistry::from_tasks(&previous.tasks);
-    registry.replace_source_tasks("local-session", watcher.scan(now), now);
-    let mut next = previous.clone();
-    next.tasks = registry.tasks();
-    next.task_counts = registry.counts();
-    next.active_task_count = next.task_counts.needs_action + next.task_counts.running;
-    next.changed_at = Some(now);
-    next.source = Some("manual-refresh".into());
-    store.publish_if_changed(next.clone());
-    next
+    publish_local_tasks(store, watcher.scan(now), now);
+    store.current()
+}
+
+fn publish_local_tasks(store: &SnapshotStore, tasks: Vec<TaskSummary>, now: i64) {
+    store.update(|next| {
+        let mut registry = TaskRegistry::from_tasks(&next.tasks);
+        registry.replace_source_tasks("local-session", tasks, now);
+        next.tasks = registry.tasks();
+        next.changed_at = Some(now);
+        next.source = Some("local-session".into());
+    });
 }
 
 fn is_metrics_notification(method: &str) -> bool {

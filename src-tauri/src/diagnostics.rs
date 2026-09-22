@@ -11,6 +11,7 @@ pub enum DiagnosticCategory {
     NetworkUnavailable,
     Timeout,
     MalformedResponse,
+    ServiceUnavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -26,9 +27,10 @@ impl DiagnosticCategory {
             Self::NotLoggedIn => "Codex 未登录，请先在 Codex 中登录",
             Self::AppServerUnavailable => "Codex app-server 暂时不可用",
             Self::ProtocolMismatch => "Codex 协议版本不兼容",
-            Self::NetworkUnavailable => "局域网连接不可用",
+            Self::NetworkUnavailable => "无法连接 Codex 服务，请检查网络",
             Self::Timeout => "读取 Codex 数据超时",
             Self::MalformedResponse => "Codex 返回的数据格式异常",
+            Self::ServiceUnavailable => "Codex 服务暂时无法读取数据，请稍后重试",
         }
     }
 }
@@ -40,14 +42,20 @@ pub fn classify(error: &CodexError) -> DiagnosticCategory {
             DiagnosticCategory::AppServerUnavailable
         }
         CodexError::Protocol(_) => DiagnosticCategory::MalformedResponse,
-        CodexError::Json(_) => DiagnosticCategory::ProtocolMismatch,
+        CodexError::Json(_) => DiagnosticCategory::MalformedResponse,
         CodexError::Response(text) => classify_response(text),
     }
 }
 
 fn classify_response(text: &str) -> DiagnosticCategory {
     let text = text.to_ascii_lowercase();
-    if text.contains("unauthenticated") || text.contains("login") {
+    if text.contains("unauthenticated")
+        || text.contains("login")
+        || text.contains("unauthorized")
+        || text.contains("401")
+        || text.contains("token expired")
+        || text.contains("refresh token")
+    {
         return DiagnosticCategory::NotLoggedIn;
     }
     if text.contains("timed out")
@@ -65,7 +73,15 @@ fn classify_response(text: &str) -> DiagnosticCategory {
             DiagnosticCategory::Timeout
         };
     }
-    DiagnosticCategory::ProtocolMismatch
+    if text.contains("method not found")
+        || text.contains("-32601")
+        || text.contains("invalid params")
+        || text.contains("-32602")
+    {
+        DiagnosticCategory::ProtocolMismatch
+    } else {
+        DiagnosticCategory::ServiceUnavailable
+    }
 }
 
 pub fn diagnostic(category: DiagnosticCategory, schema_version: &str) -> Diagnostic {
@@ -92,6 +108,14 @@ mod tests {
 
     #[test]
     fn backend_usage_timeout_is_not_reported_as_protocol_mismatch() {
+        assert_eq!(
+            classify(&CodexError::Response("upstream service unavailable".into())),
+            DiagnosticCategory::ServiceUnavailable
+        );
+        assert_eq!(
+            classify(&CodexError::Response("401 Unauthorized".into())),
+            DiagnosticCategory::NotLoggedIn
+        );
         assert_eq!(
             classify(&CodexError::Response(
                 "{\"message\":\"token usage profile fetch timed out\"}".into()

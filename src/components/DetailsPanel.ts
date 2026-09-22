@@ -3,6 +3,7 @@ import { ApprovalDecision, renderTaskList } from './TaskList'
 import { MountedView } from './FloatingIsland'
 import { RESET_FORECAST_SOURCE_URL, RESET_FORECAST_STALE_AFTER_MS, ResetForecast } from '../resetForecast'
 import { Language, getLanguage, t, toggleLanguage } from '../i18n'
+import { errorLabel, formatTokens, planLabel as formatPlanLabel } from '../presentation'
 
 function formatRecentTime(epoch?: number, language: Language = getLanguage()) { return epoch ? new Date(epoch * 1000).toLocaleString(language, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--' }
 function formatResetTime(epoch?: number, language: Language = getLanguage()) { return epoch ? new Date(epoch * 1000).toLocaleString(language, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '--' }
@@ -25,17 +26,6 @@ function sourceLabel(source: Snapshot['source'], language: Language = getLanguag
   }
   return source ? labels[source] ?? '' : ''
 }
-function formatTokens(tokens?: number) {
-  if (tokens === undefined) return '--'
-  if (tokens < 10_000) return String(tokens)
-  if (tokens >= 100_000_000) {
-    const value = tokens / 100_000_000
-    return `${Number(value.toFixed(tokens >= 1_000_000_000 ? 0 : 1))}亿`
-  }
-  const value = tokens / 10_000
-  return `${Number(value.toFixed(tokens >= 1_000_000 ? 0 : 1))}万`
-}
-
 function formatForecastElapsed(hours?: number, language: Language = getLanguage()) {
   if (hours === undefined) return '--'
   const totalMinutes = Math.max(0, Math.round(hours * 60))
@@ -283,7 +273,7 @@ export function mountDetailsPanel(
   })
   refreshButton.addEventListener('click', onRefresh)
   if (onAdvance) panel.addEventListener('dblclick', (event) => {
-    if ((event.target as HTMLElement).closest('button')) return
+    if ((event.target as HTMLElement).closest('button,a,input,select,textarea') || window.getSelection()?.toString()) return
     onAdvance()
   })
 
@@ -354,18 +344,18 @@ export function mountDetailsPanel(
       resetLabel.textContent = plus ? t('fiveHourReset', language) : t('nextReset', language)
       resetValue.textContent = formatResetTime(plus ? snapshot.fiveHourResetsAt : snapshot.quotaResetsAt, language)
       weeklyQuotaNote.textContent = plus ? `${t('weeklyRemaining', language)} ${value(snapshot.quotaRemainingPercent)}${snapshot.quotaRemainingPercent === undefined ? '' : '%'}, ${t('quotaResetAt', language)} ${formatResetDate(snapshot.quotaResetsAt, language)}` : ''
-      planValue.textContent = value(snapshot.plan)
+      planValue.textContent = formatPlanLabel(snapshot.plan)
       creditsValue.textContent = value(snapshot.resetCredits)
       tokenDetailLabel.textContent = tokenLabel(snapshot)
-      tokensValue.textContent = formatTokens(snapshot.todayTokens)
+      tokensValue.textContent = formatTokens(snapshot.todayTokens, language)
       freshness.className = `freshness ${snapshot.status}`
       const source = sourceLabel(snapshot.source, language)
-      const warning = snapshot.error === 'usage_unavailable' ? t('usageUnavailable', language) : snapshot.error
+      const warning = errorLabel(snapshot.error, language)
       freshness.textContent = snapshot.status === 'fresh'
         ? `${t('connected', language)} · ${t('recentlyUpdated', language)} ${formatRecentTime(snapshot.fetchedAt, language)}${source ? ` · ${source}` : ''}${warning ? ` · ${warning}` : ''}`
         : snapshot.status === 'stale'
-          ? `${snapshot.error ?? t('dataExpired', language)} · ${t('reconnecting', language)} · ${t('keepLastData', language)} · ${t('lastSuccess', language)} ${formatRecentTime(snapshot.fetchedAt, language)}${source ? ` · ${source}` : ''}`
-          : `${snapshot.error ?? t('temporarilyUnavailable', language)} · ${t('keepLastData', language)} · ${t('lastSuccess', language)} ${formatRecentTime(snapshot.fetchedAt, language)}`
+          ? `${warning || t('dataExpired', language)} · ${t('reconnecting', language)} · ${t('keepLastData', language)} · ${t('lastSuccess', language)} ${formatRecentTime(snapshot.fetchedAt, language)}${source ? ` · ${source}` : ''}`
+          : `${warning || t('temporarilyUnavailable', language)} · ${t('keepLastData', language)} · ${t('lastSuccess', language)} ${formatRecentTime(snapshot.fetchedAt, language)}`
       renderResetForecast(resetForecastCard, currentResetForecast, language)
       const signature = taskSignature(snapshot)
       if (signature !== lastTaskSignature) {

@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases">下载 Windows / Apple Silicon Mac 版</a> ·
-  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.3">v1.0.3 发行版</a> ·
+  <a href="https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.4">v1.0.4 发行版</a> ·
   <a href="LICENSE">MIT 许可证</a>
 </p>
 
@@ -49,6 +49,14 @@ Codex 工作时会产生很多有用状态，但额度、重置时间和任务�
 <p align="center"><img src="docs/images/zh/settings.png" alt="Codex 额度悬浮窗设置页" width="620"></p>
 
 设置页集中提供主题、开机自启、始终置顶、更新、仓库和联系入口。
+
+## v1.0.4 本次更新
+
+- 更稳定地发现和更新任务状态，包括修改时间不变、分批写入的会话记录。
+- 额度刷新不再回退较新的任务状态；没有新记录时显示状态待确认，不猜测任务已完成。
+- 改进 Pro 额度兼容和服务错误提示；Codex 升级后自动重新寻找程序位置。
+- 修复手机重新配对与刷新反馈，改进英文窄屏显示和配对安全。
+- 软件更新先显示新版本，确认后才安装。详细内容见[版本记录](CHANGELOG.md)。
 
 ## v1.0.3 本次更新
 
@@ -129,7 +137,7 @@ Windows 和 Apple Silicon macOS 发行流程由 GitHub Actions 构建。Windows 
 3. 启动 Codex，再启动 Codex 额度悬浮窗。
 4. 在详情页打开“配对”，复制或扫描局域网地址，在同一 Wi‑Fi 的手机上输入四位配对码。
 
-当前稳定版是 [v1.0.3](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.3)，旧版本仍保留，不会被覆盖。
+当前稳定版是 [v1.0.4](https://github.com/nf2huochao/Codex-QuotaOrb/releases/tag/v1.0.4)，旧版本仍保留，不会被覆盖。
 
 ## 工作方式
 

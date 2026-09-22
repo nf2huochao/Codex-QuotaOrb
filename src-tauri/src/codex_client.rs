@@ -38,6 +38,7 @@ pub enum CodexError {
 }
 
 pub struct CodexClient {
+    pub(crate) metrics_lock: Mutex<()>,
     binary: PathBuf,
     stdin: Arc<Mutex<ChildStdin>>,
     child: Arc<Mutex<Child>>,
@@ -71,6 +72,7 @@ impl CodexClient {
         let (notifications, _) = broadcast::channel(128);
         let connected = Arc::new(AtomicBool::new(true));
         let client = Self {
+            metrics_lock: Mutex::new(()),
             binary: codex_binary.to_path_buf(),
             stdin: Arc::new(Mutex::new(stdin)),
             child: Arc::new(Mutex::new(child)),

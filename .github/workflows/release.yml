@@ -12,6 +12,9 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    concurrency:
+      group: quotaorb-release-${{ github.ref_name }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -49,11 +52,12 @@ jobs:
           releaseBody: |
             ## 本次更新 / Release notes
 
-            - 增加 Codex 路径自动检测和手动指定，Windows 优先使用当前 npm 安装版本。
-            - Codex 用量接口暂时超时时仍保留最新额度显示，旧用量保留并自动重试。
-            - 错误提示区分超时、网络、登录和协议问题。
-            - Added automatic and user-selected Codex executable paths, with graceful quota fallback when usage data is temporarily unavailable.
-            - Signed Windows installer, `latest.json`, and `.sig` are included when repository signing secrets are configured.
+            - 修复部分对话状态漏读、额度刷新覆盖任务状态及旧记录误判运行中的问题。
+            - 改进 Pro 额度兼容、Codex 升级后的重连、手机重新配对和英文显示。
+            - 软件更新先展示可用版本，经用户确认后安装。
+            - Improved task-state reliability, Pro quota compatibility, Codex reconnection, phone pairing, and English display.
+            - Update checks now show the available version and ask before installing.
+            - Windows includes a signed installer and updater files. The Apple Silicon macOS package remains an unsigned test build.
 
             详细说明见仓库中的 CHANGELOG.md。
           releaseDraft: false
@@ -71,19 +75,30 @@ jobs:
           $release = gh release view $tag --json assets | ConvertFrom-Json
           $installer = $release.assets | Where-Object { $_.name -like "*-setup.exe" } | Select-Object -First 1
           if ($null -eq $installer) { throw "Windows installer asset was not found in release $tag." }
+          $platforms = [ordered]@{
+            "windows-x86_64" = [ordered]@{
+              signature = $signature
+              url = $installer.url
+            }
+          }
+          # Either platform may finish first; retain an already-published macOS entry.
+          $previousManifest = Join-Path $env:RUNNER_TEMP "quotaorb-previous-latest.json"
+          gh release download $tag --pattern latest.json --output $previousManifest 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $previous = Get-Content -Raw -LiteralPath $previousManifest | ConvertFrom-Json
+            $mac = $previous.platforms.'darwin-aarch64'
+            if ($null -ne $mac) {
+              $platforms["darwin-aarch64"] = [ordered]@{
+                signature = $mac.signature
+                url = $mac.url
+              }
+            }
+          }
           $manifest = [ordered]@{
             version = "${{ github.ref_name }}" -replace '^v', ''
             notes = "Codex QuotaOrb $tag"
             pub_date = (Get-Date).ToUniversalTime().ToString("o")
-            platforms = [ordered]@{
-              "windows-x86_64" = [ordered]@{
-                signature = $signature
-                # gh release view exposes the public download URL as `url`.
-                # `browserDownloadUrl` is not a valid asset field and would
-                # silently publish a null updater URL.
-                url = $installer.url
-              }
-            }
+            platforms = $platforms
           }
           $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath latest.json -Encoding utf8NoBOM
           gh release upload $tag latest.json --clobber

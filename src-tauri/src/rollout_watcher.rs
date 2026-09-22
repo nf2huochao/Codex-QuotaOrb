@@ -1,7 +1,7 @@
 use crate::domain::{TaskStatus, TaskSummary};
 use serde_json::Value;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, File},
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -12,11 +12,8 @@ const INITIAL_HEAD_BYTES: u64 = 128 * 1024;
 const TAIL_BYTES: u64 = 768 * 1024;
 const COMPLETED_VISIBLE_SECONDS: i64 = 6 * 60 * 60;
 const ACTIVE_VISIBLE_SECONDS: i64 = 15 * 60;
-// Keep the watcher bounded like the HUD reference implementation. Codex can
-// accumulate thousands of historical rollout files; scanning all of them on
-// every tick is both slow and likely to surface archived conversations.
-const ACTIVE_FILE_WINDOW_SECONDS: i64 = 30 * 60;
-const MAX_ACTIVE_FILES: usize = 64;
+const DISCOVERY_INTERVAL_SECONDS: i64 = 5;
+const READ_FAILURE_GRACE_SECONDS: i64 = 5;
 
 #[derive(Debug, Clone)]
 struct FileState {
@@ -31,6 +28,8 @@ struct FileState {
     updated_at: i64,
     activity_at: i64,
     modified_at: i64,
+    last_read_at: i64,
+    waiting_call_id: Option<String>,
 }
 
 impl Default for FileState {
@@ -47,6 +46,8 @@ impl Default for FileState {
             updated_at: 0,
             activity_at: 0,
             modified_at: 0,
+            last_read_at: 0,
+            waiting_call_id: None,
         }
     }
 }
@@ -56,6 +57,8 @@ pub struct RolloutWatcher {
     root: PathBuf,
     files: HashMap<PathBuf, FileState>,
     titles: HashMap<String, String>,
+    paths: Vec<PathBuf>,
+    next_discovery: i64,
 }
 
 impl RolloutWatcher {
@@ -64,45 +67,36 @@ impl RolloutWatcher {
             root,
             files: HashMap::new(),
             titles: HashMap::new(),
+            paths: Vec::new(),
+            next_discovery: 0,
         }
     }
 
     pub fn scan(&mut self, now: i64) -> Vec<TaskSummary> {
-        self.titles = load_session_titles(&self.root);
-        let mut paths = Vec::new();
-        collect_jsonl_files(&self.root, &mut paths);
-        let mut candidates: Vec<(PathBuf, i64)> = paths
-            .into_iter()
-            .filter_map(|path| {
-                let modified_at = fs::metadata(&path)
-                    .ok()?
-                    .modified()
-                    .ok()?
-                    .duration_since(UNIX_EPOCH)
-                    .ok()?
-                    .as_secs() as i64;
-                Some((path, modified_at))
-            })
-            .collect();
-        candidates.sort_by_key(|(_, modified_at)| std::cmp::Reverse(*modified_at));
-        let mut paths: Vec<PathBuf> = candidates
-            .iter()
-            .filter(|(_, modified_at)| {
-                now.saturating_sub(*modified_at) <= ACTIVE_FILE_WINDOW_SECONDS
-            })
-            .take(MAX_ACTIVE_FILES)
-            .map(|(path, _)| path.clone())
-            .collect();
-        // When Codex has been idle, retain only the newest file so the UI can
-        // still show the last known conversation without reviving old history.
-        if paths.is_empty() {
-            if let Some((path, _)) = candidates.first() {
-                paths.push(path.clone());
+        if now >= self.next_discovery {
+            self.titles = load_session_titles(&self.root);
+            let mut paths = Vec::new();
+            collect_jsonl_files(&self.root, &mut paths);
+            // A failed directory read is not evidence that all tasks ended.
+            if !paths.is_empty() {
+                self.paths = paths;
+                let known_paths: HashSet<_> = self.paths.iter().collect();
+                self.files.retain(|path, _| known_paths.contains(path));
             }
+            self.next_discovery = now + DISCOVERY_INTERVAL_SECONDS;
         }
         let mut tasks = Vec::new();
-        for path in paths {
-            let Some(state) = self.read_file(&path, now) else {
+        // Windows may keep mtime unchanged while an open file grows. Inspect
+        // length for every discovered file; only parse the appended bytes.
+        for path in self.paths.clone() {
+            let Some(state) = self.read_file(&path, now).or_else(|| {
+                self.files
+                    .get(&path)
+                    .filter(|state| {
+                        now.saturating_sub(state.last_read_at) <= READ_FAILURE_GRACE_SECONDS
+                    })
+                    .cloned()
+            }) else {
                 continue;
             };
             let file_id = session_id_from_filename(&path);
@@ -119,11 +113,13 @@ impl RolloutWatcher {
             else {
                 continue;
             };
-            let age = now.saturating_sub(state.modified_at);
+            let age = now.saturating_sub(state.updated_at);
+            if state.updated_at == 0 || age > COMPLETED_VISIBLE_SECONDS {
+                continue;
+            }
             let status = match state.status {
-                TaskStatus::Running | TaskStatus::NeedsAction if age <= ACTIVE_VISIBLE_SECONDS => {
-                    state.status
-                }
+                TaskStatus::Running if age <= ACTIVE_VISIBLE_SECONDS => state.status,
+                TaskStatus::NeedsAction => state.status,
                 TaskStatus::Completed if age <= COMPLETED_VISIBLE_SECONDS => state.status,
                 _ => TaskStatus::None,
             };
@@ -145,10 +141,12 @@ impl RolloutWatcher {
                 title,
                 activity: state.activity,
                 waiting_reason: state.waiting_reason,
-                approval_request_id: state.approval_request_id,
+                // A rollout request belongs to the owning Codex process and
+                // cannot be approved through our separate app-server channel.
+                approval_request_id: None,
                 status,
                 token_count: state.token_count,
-                updated_at: state.updated_at.max(state.modified_at),
+                updated_at: state.updated_at,
                 acknowledged: false,
                 source: Some("local-session".into()),
                 turn_id: state.turn_id,
@@ -170,6 +168,10 @@ impl RolloutWatcher {
         let len = metadata.len();
         let state = self.files.entry(path.to_path_buf()).or_default();
         state.modified_at = modified_at;
+        if state.offset > 0 && state.offset == len {
+            state.last_read_at = now;
+            return Some(state.clone());
+        }
 
         let mut file = File::open(path).ok()?;
         if state.offset == 0 {
@@ -194,17 +196,26 @@ impl RolloutWatcher {
             state.token_count = None;
             state.updated_at = 0;
             state.activity_at = 0;
+            state.waiting_call_id = None;
         }
 
         if state.offset < len {
+            if len - state.offset > TAIL_BYTES {
+                state.offset = len.saturating_sub(TAIL_BYTES);
+            }
             file.seek(SeekFrom::Start(state.offset)).ok()?;
             let mut bytes = Vec::with_capacity((len - state.offset) as usize);
-            file.read_to_end(&mut bytes).ok()?;
-            state.offset = len;
-            parse_lines(&String::from_utf8_lossy(&bytes), state, now);
+            file.take(len - state.offset).read_to_end(&mut bytes).ok()?;
+            // Never discard a partly written JSON record. Reread its bytes
+            // when Codex appends the terminating newline on a later tick.
+            if let Some(end) = bytes.iter().rposition(|byte| *byte == b'\n') {
+                state.offset += (end + 1) as u64;
+                parse_lines(&String::from_utf8_lossy(&bytes[..=end]), state, now);
+            }
         } else if state.offset == 0 && len == 0 {
             state.offset = 0;
         }
+        state.last_read_at = now;
         self.files.get(path).cloned()
     }
 }
@@ -288,6 +299,9 @@ fn parse_lines(text: &str, state: &mut FileState, now: i64) {
         if let Some(title) = user_title(&value) {
             state.activity = Some(title);
             state.status = TaskStatus::Running;
+            state.waiting_reason = None;
+            state.approval_request_id = None;
+            state.waiting_call_id = None;
         }
         update_status(&value, state);
         if is_approval_value(&value) {
@@ -300,7 +314,9 @@ fn parse_lines(text: &str, state: &mut FileState, now: i64) {
         }
         if state.activity.is_some() || state.waiting_reason.is_some() || state.token_count.is_some()
         {
-            state.updated_at = timestamp(&value).unwrap_or(now);
+            state.updated_at = state
+                .updated_at
+                .max(timestamp(&value).unwrap_or(state.modified_at.min(now)));
             state.activity_at = state.updated_at;
         }
     }
@@ -314,21 +330,39 @@ fn update_status(value: &Value, state: &mut FileState) {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_ascii_lowercase();
-    if let Some(turn_id) = string_field(payload, &["turn_id", "turnId", "turn"]) {
-        state.turn_id = Some(turn_id);
+    let turn_id = string_field(payload, &["turn_id", "turnId", "turn"]);
+    if (is_completion_event(record_type, &payload_type)
+        || is_inactive_event(record_type, &payload_type))
+        && turn_id.is_some()
+        && state.turn_id.is_some()
+        && turn_id != state.turn_id
+    {
+        return;
     }
+    state.turn_id = turn_id.or(state.turn_id.clone());
     let timestamp = timestamp(value).unwrap_or(state.updated_at);
     if is_inactive_event(record_type, &payload_type) {
         state.status = TaskStatus::None;
         state.activity = None;
         state.waiting_reason = None;
         state.approval_request_id = None;
+        state.waiting_call_id = None;
         state.updated_at = state.updated_at.max(timestamp);
         state.activity_at = state.updated_at;
         return;
     }
-    if is_approval_event(record_type, &payload_type) {
+    let tool_wait = record_type == "response_item"
+        && matches!(payload_type.as_str(), "function_call" | "custom_tool_call")
+        && payload
+            .get("name")
+            .and_then(Value::as_str)
+            .is_some_and(|name| {
+                !name.contains("request_user_input_async")
+                    && (name.contains("request_user_input") || name.contains("requestUserInput"))
+            });
+    if is_approval_event(record_type, &payload_type) || tool_wait {
         state.status = TaskStatus::NeedsAction;
+        state.waiting_call_id = string_field(payload, &["call_id", "callId"]);
         state.approval_request_id = string_field(
             payload,
             &[
@@ -342,11 +376,29 @@ fn update_status(value: &Value, state: &mut FileState) {
     }
     if is_completion_event(record_type, &payload_type) {
         state.status = TaskStatus::Completed;
+        state.waiting_reason = None;
+        state.approval_request_id = None;
+        state.waiting_call_id = None;
         state.updated_at = state.updated_at.max(timestamp);
         return;
     }
-    if is_running_event(record_type, &payload_type) {
+    let resolves_wait = state.waiting_call_id.is_some()
+        && string_field(payload, &["call_id", "callId"]) == state.waiting_call_id
+        && matches!(
+            payload_type.as_str(),
+            "function_call_output" | "custom_tool_call_output"
+        );
+    if resolves_wait || is_running_event(record_type, &payload_type) {
+        if state.status == TaskStatus::NeedsAction
+            && !resolves_wait
+            && !matches!(payload_type.as_str(), "task_started" | "turn_started")
+        {
+            return;
+        }
         state.status = TaskStatus::Running;
+        state.waiting_reason = None;
+        state.approval_request_id = None;
+        state.waiting_call_id = None;
     }
 }
 
@@ -402,7 +454,6 @@ fn is_running_event(record_type: &str, payload_type: &str) -> bool {
                     | "turn_started"
                     | "agent_reasoning"
                     | "agent_message"
-                    | "token_count"
                     | "patch_apply_begin"
                     | "patch_apply_end"
             ))
@@ -531,6 +582,80 @@ mod tests {
     use std::{fs::OpenOptions, io::Write};
 
     #[test]
+    #[ignore = "read-only local session timing; reports counts only"]
+    fn local_watcher_timing() {
+        let now = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let mut watcher = RolloutWatcher::new(default_root());
+        let start = std::time::Instant::now();
+        let tasks = watcher.scan(now);
+        let cold = start.elapsed();
+        let start = std::time::Instant::now();
+        watcher.scan(now + 1);
+        println!(
+            "files={} visible_tasks={} cold_ms={} warm_ms={}",
+            watcher.files.len(),
+            tasks.len(),
+            cold.as_millis(),
+            start.elapsed().as_millis()
+        );
+    }
+
+    #[test]
+    fn lifecycle_survives_frozen_mtime_and_split_records() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("rollout-live.jsonl");
+        let now = 1_790_000_000;
+        fs::write(&path, format!("{{\"timestamp\":{now},\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"live\"}}}}\n{{\"timestamp\":{now},\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":\"核心任务\"}}}}\n")).unwrap();
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        let old = UNIX_EPOCH + std::time::Duration::from_secs((now - 7200) as u64);
+        file.set_modified(old).unwrap();
+        let mut watcher = RolloutWatcher::new(root.path().to_path_buf());
+        assert_eq!(watcher.scan(now)[0].status, TaskStatus::Running);
+        let wait = format!("{{\"timestamp\":{},\"type\":\"response_item\",\"payload\":{{\"type\":\"function_call\",\"name\":\"functions.request_user_input\",\"call_id\":\"wait-1\"}}}}\n", now + 1);
+        file.write_all(&wait.as_bytes()[..40]).unwrap();
+        file.set_modified(old).unwrap();
+        assert_eq!(watcher.scan(now + 1)[0].status, TaskStatus::Running);
+        file.write_all(&wait.as_bytes()[40..]).unwrap();
+        file.set_modified(old).unwrap();
+        assert_eq!(watcher.scan(now + 2)[0].status, TaskStatus::NeedsAction);
+        writeln!(
+            file,
+            "{{\"timestamp\":{},\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\"}}}}",
+            now + 3
+        )
+        .unwrap();
+        assert_eq!(watcher.scan(now + 3)[0].status, TaskStatus::NeedsAction);
+        writeln!(file, "{{\"timestamp\":{},\"type\":\"response_item\",\"payload\":{{\"type\":\"function_call_output\",\"call_id\":\"wait-1\"}}}}", now + 4).unwrap();
+        assert_eq!(watcher.scan(now + 4)[0].status, TaskStatus::Running);
+        writeln!(file, "{{\"timestamp\":{},\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_complete\"}}}}", now + 5).unwrap();
+        writeln!(
+            file,
+            "{{\"timestamp\":{},\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\"}}}}",
+            now + 6
+        )
+        .unwrap();
+        file.set_modified(old).unwrap();
+        assert_eq!(watcher.scan(now + 6)[0].status, TaskStatus::Completed);
+        // Restarting the monitor must reconstruct the same final state.
+        assert_eq!(
+            RolloutWatcher::new(root.path().to_path_buf()).scan(now + 7)[0].status,
+            TaskStatus::Completed
+        );
+    }
+
+    #[test]
+    fn silent_work_becomes_unconfirmed_not_completed() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("live.jsonl"), "{\"timestamp\":1000,\"type\":\"response_item\",\"payload\":{\"session_id\":\"live\",\"type\":\"message\",\"role\":\"user\",\"content\":\"long task\"}}\n").unwrap();
+        let mut watcher = RolloutWatcher::new(root.path().to_path_buf());
+        assert_eq!(watcher.scan(1000)[0].status, TaskStatus::Running);
+        assert_eq!(watcher.scan(2000)[0].status, TaskStatus::None);
+    }
+
+    #[test]
     fn extracts_title_without_assigning_status() {
         let input = r#"{"type":"session_meta","payload":{"session_id":"thread-1"}}
 {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"修复任务同步问题。补充测试"}]}}
@@ -583,8 +708,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        let root = std::env::temp_dir().join(format!("codex-rollout-watcher-{now}"));
-        let day = root.join("2026").join("08").join("22");
+        let root = tempfile::tempdir().unwrap();
+        let day = root.path().join("2026").join("08").join("22");
         std::fs::create_dir_all(&day).unwrap();
         let first = day.join("rollout-a.jsonl");
         let second = day.join("rollout-b.jsonl");
@@ -602,7 +727,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let mut watcher = RolloutWatcher::new(root.clone());
+        let mut watcher = RolloutWatcher::new(root.path().to_path_buf());
         let tasks = watcher.scan(now);
         assert_eq!(tasks.len(), 2);
         assert!(tasks
@@ -621,6 +746,5 @@ mod tests {
                 .map(|task| task.status),
             Some(TaskStatus::Completed)
         );
-        let _ = std::fs::remove_dir_all(root);
     }
 }

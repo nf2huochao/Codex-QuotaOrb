@@ -97,34 +97,17 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateStatus, String
         let updater = app
             .updater()
             .map_err(|error| format!("更新服务初始化失败：{error}"))?;
-        let update = match updater.check().await {
-            Ok(update) => update,
-            Err(error) => {
-                // GitHub Releases may exist before its signed updater artifacts are
-                // uploaded. Report that state explicitly instead of showing the
-                // misleading generic "error sending request" message.
-                let detail = error.to_string();
-                return Ok(UpdateStatus {
-                    current_version: env!("CARGO_PKG_VERSION").into(),
-                    available: false,
-                    latest_version: None,
-                    message: format!(
-                        "GitHub 更新源暂不可用：发行版需要同时提供 latest.json 和签名文件（{detail}）"
-                    ),
-                });
-            }
-        };
+        let update = updater
+            .check()
+            .await
+            .map_err(|error| format!("无法检查更新，请检查网络或稍后重试：{error}"))?;
         if let Some(update) = update {
             let latest_version = update.version.clone();
-            update
-                .download_and_install(|_, _| {}, || {})
-                .await
-                .map_err(|error| format!("更新下载或验签失败：{error}"))?;
             return Ok(UpdateStatus {
                 current_version: env!("CARGO_PKG_VERSION").into(),
                 available: true,
                 latest_version: Some(latest_version.clone()),
-                message: format!("已安装 {latest_version}，应用即将重启"),
+                message: format!("发现新版本 {latest_version}"),
             });
         }
     }
@@ -134,6 +117,30 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateStatus, String
         latest_version: None,
         message: "当前已是最新版本".into(),
     })
+}
+
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle, expected_version: String) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        let update = app
+            .updater()
+            .map_err(|error| error.to_string())?
+            .check()
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "当前没有可安装的更新".to_owned())?;
+        if update.version != expected_version {
+            return Err("发行版本已变化，请重新检查更新".into());
+        }
+        update
+            .download_and_install(|_, _| {}, || {})
+            .await
+            .map_err(|error| format!("更新下载或验签失败：{error}"))?;
+        return Ok(());
+    }
+    #[cfg(not(desktop))]
+    Err("当前平台不支持自动安装更新".into())
 }
 
 #[tauri::command]
@@ -168,6 +175,15 @@ async fn refresh_now(state: tauri::State<'_, AppState>) -> Result<domain::Snapsh
     let previous = state.store.current();
     let refreshed_at = now();
     let Some(client) = state.client.lock().await.clone() else {
+        state.store.update(|snapshot| {
+            snapshot.status = if snapshot.fetched_at.is_some() {
+                domain::DataStatus::Stale
+            } else {
+                domain::DataStatus::Error
+            };
+            snapshot.error = Some("正在连接 Codex，当前显示上次成功数据".into());
+            snapshot.changed_at = Some(now());
+        });
         return Ok(poller::refresh_local_tasks(
             &state.store,
             &previous,
@@ -180,7 +196,7 @@ async fn refresh_now(state: tauri::State<'_, AppState>) -> Result<domain::Snapsh
     )
     .await
     .map_err(|_| "同步数据超时，请稍后重试".to_owned())?;
-    snapshot.changed_at = Some(refreshed_at);
+    snapshot.changed_at = Some(now());
     snapshot.source = Some("manual-refresh".into());
     Ok(snapshot)
 }
@@ -304,18 +320,13 @@ pub fn run() {
     let (store, _) = SnapshotStore::new(empty_snapshot());
     let client = Arc::new(AsyncMutex::new(None));
     let hook_bridge = hook_bridge::HookBridge::default();
-    let pairing_path = std::env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("com.codex.quota-floating-window")
-        .join("pairing.json");
+    let pairing_path = app_config_dir().join("pairing.json");
     let pairing = Arc::new(RwLock::new(
         lan_server::load_or_create(&pairing_path).unwrap_or_else(|_| lan_server::PairingState {
             code: lan_server::create_code(),
             session_token: lan_server::create_token(),
         }),
     ));
-    let codex_binary = resolve_codex_binary();
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
@@ -337,6 +348,7 @@ pub fn run() {
             get_pairing_info,
             reset_pairing,
             check_for_updates,
+            install_update,
             relaunch_app,
             refresh_now,
             acknowledge_task,
@@ -356,7 +368,6 @@ pub fn run() {
             let store = state.store.clone();
             // Task lifecycle comes from Codex's local session records, not the
             // app-server child process started by this monitor.
-            let _ = poller::spawn_local_task_loop(store.clone());
             let cache_path = app
                 .path()
                 .app_data_dir()?
@@ -392,6 +403,7 @@ pub fn run() {
                     let _ = event_handle.emit("snapshot-updated", snapshot);
                 }
             });
+            let _ = poller::spawn_local_task_loop(store.clone());
             let _ = lan_server::spawn(
                 store.clone(),
                 Arc::clone(&pairing),
@@ -399,10 +411,11 @@ pub fn run() {
                 hook_bridge.clone(),
             );
             let client_slot = Arc::clone(&state.client);
-            let codex_binary = codex_binary.clone();
             tauri::async_runtime::spawn(async move {
                 let mut retry_delay = std::time::Duration::from_secs(2);
                 loop {
+                    // npm upgrades may replace the executable while this HUD remains open.
+                    let codex_binary = resolve_codex_binary();
                     match codex_client::CodexClient::spawn(&codex_binary).await {
                         Ok(client) => {
                             let client = Arc::new(client);
@@ -411,18 +424,24 @@ pub fn run() {
                                 poller::spawn_poll_loop(store.clone(), Arc::clone(&client)).await;
                             let _ = client.stop().await;
                             *client_slot.lock().await = None;
-                            let mut snapshot = store.current();
-                            snapshot.status = domain::DataStatus::Stale;
-                            snapshot.error = Some("Codex app-server 已断开，正在重连…".into());
-                            store.publish_if_changed(snapshot);
+                            store.update(|snapshot| {
+                                snapshot.status = domain::DataStatus::Stale;
+                                snapshot.changed_at = Some(now());
+                                snapshot.error = Some("Codex app-server 已断开，正在重连…".into());
+                            });
                             retry_delay = std::time::Duration::from_secs(2);
                         }
                         Err(error) => {
-                            let mut snapshot = store.current();
-                            snapshot.status = domain::DataStatus::Error;
-                            snapshot.error =
-                                Some(format!("无法连接 Codex app-server，正在重试… ({error})"));
-                            store.publish_if_changed(snapshot);
+                            store.update(|snapshot| {
+                                snapshot.status = if snapshot.fetched_at.is_some() {
+                                    domain::DataStatus::Stale
+                                } else {
+                                    domain::DataStatus::Error
+                                };
+                                snapshot.changed_at = Some(now());
+                                snapshot.error =
+                                    Some(diagnostics::classify(&error).message().into());
+                            });
                         }
                     }
                     tokio::time::sleep(retry_delay).await;
@@ -493,5 +512,5 @@ fn resolve_codex_binary() -> PathBuf {
     candidates
         .into_iter()
         .find(|candidate| candidate.is_file())
-        .unwrap_or_else(|| PathBuf::from("codex.exe"))
+        .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "codex.exe" } else { "codex" }))
 }
