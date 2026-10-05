@@ -4,6 +4,21 @@ All notable changes to Codex QuotaOrb are documented here in Chinese and English
 
 Codex 额度悬浮窗的主要新增、改进和修复均在此以中英文记录。
 
+## v1.0.5 — 2026-10-05
+
+### Fixed / 修复
+
+- Local task synchronization now timestamps valid execution and reasoning independently of request text or token values. Bounded large-log reads can recover active tasks when the initial request was skipped. Usage records support both total_token_usage and token_usage_record without reviving completed tasks. / 本地任务同步依据有效执行与推理记录更新时间，不再依赖请求文字或 Token；有界读取大日志时，即使跳过最初请求也能恢复活跃任务。兼容两类实际用量记录，统计数据不会复活已结束任务。
+
+- Enforce the pairing cooldown before validating further guesses; resetting pairing clears the cooldown. / 配对连续输错五次后暂停校验一分钟，避免继续猜测绕过限制；重置配对可清除等待。
+- Disable settings controls during initial loading and writes to prevent stale reads and overlapping changes. Failed writes restore the switch state. / 设置读取和保存期间禁用对应控件，避免旧值覆盖和连续操作冲突；保存失败恢复开关状态并提示。
+- Hide the previous diagnostic report when generating a replacement, and allow a failed window resize to be retried. / 重新生成诊断报告时隐藏旧报告，避免把旧结果误认为新结果；窗口尺寸调整失败后允许重试。
+
+### Added / 新增
+
+- Added a one-click, local diagnostic report in desktop Settings. It is saved to Downloads and previewed before the user decides whether to share it. The report uses an explicit allowlist of version, platform, connection, timestamps, status, task counts and Hook delivery totals; it excludes conversation text, task titles, identifiers, credentials, paths and raw errors. / 桌面设置页新增一键生成本地诊断报告，保存到“下载”文件夹并显示内容，由用户检查后自行决定是否发送。报告只列软件版本、平台、连接、时间、状态、任务数量与 Hook 投递统计，不含对话、任务名称、标识符、凭据、路径或原始错误。
+- The desktop app checks for a new version once shortly after each launch. It only prompts when a new version is found, never installs without confirmation, and does not run periodic checks. / 桌面软件每次启动后仅检查一次新版本；只有发现新版本才提醒，安装仍需确认，不进行定时检查。
+
 ## v1.0.4 — 2026-09-23
 
 ### Fixed / 修复

@@ -181,6 +181,10 @@ button:focus-visible,a:focus-visible,input:focus-visible { outline:2px solid cur
 .settings-path-clear { background:rgba(247,241,230,.72); color:var(--theme-muted); }
 .settings-path-save:disabled,.settings-path-clear:disabled { cursor:wait; opacity:.65; }
 .codex-path-status { display:block; min-height:14px; margin-top:7px; color:var(--theme-muted); font-size:10px; }
+.settings-diagnostics-actions { justify-content:flex-start; margin-top:10px; }
+.diagnostics-status { display:block; margin-top:9px; color:var(--theme-muted); font-size:10px; overflow-wrap:anywhere; }
+.diagnostics-preview { display:block; box-sizing:border-box; width:100%; min-height:160px; margin-top:9px; padding:9px; border:1px solid rgba(117,130,111,.2); border-radius:10px; background:var(--theme-inset); color:var(--theme-ink); font:10px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; resize:vertical; }
+.diagnostics-preview[hidden] { display:none; }
 .settings-about a { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-top:1px solid rgba(117,130,111,.12); color:var(--theme-ink); text-decoration:none; font-size:12px; }
 .settings-about a:first-of-type { margin-top:7px; }
 .settings-about a:hover { text-decoration:underline; }

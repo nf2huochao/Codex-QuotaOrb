@@ -50,6 +50,8 @@ Double-click the orb to cycle through the orb, capsule, and details views.
 
 The settings page keeps theme, startup, always-on-top, update, repository, and contact controls together.
 
+v1.0.5 adds a local diagnostic report in Settings, checks for updates once after launch, and fixes active conversations missing from large session logs. Generate a report, review the preview, and choose whether to share the saved file; no report is uploaded automatically.
+
 ## What's new in v1.0.4
 
 - More reliable task discovery and status updates, including session files whose modification time does not change and records written in parts.
@@ -148,6 +150,7 @@ The trend store is local to the host. A reset-derived cycle key starts a new sev
 ## Privacy and boundaries
 
 - Reads local Codex state by default; does not collect or upload prompts, command content, credentials, session bodies, or file contents.
+- The app checks GitHub once on each launch; each new version is prompted once, and installation requires confirmation.
 - The mobile page is LAN-only and requires the Windows host to remain online; there is no built-in public tunnel or cloud account sync.
 - Approvals and rejections are always completed in Codex; QuotaOrb never auto-approves.
 - The reset forecast is based on public LunarWerx data and may become stale or unavailable.

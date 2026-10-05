@@ -6,6 +6,8 @@ import { MountedView } from './FloatingIsland'
 export interface SettingsActions {
   onClose: () => void
   onCheckUpdates: () => Promise<void> | void
+  onGenerateDiagnosticReport: () => Promise<{ text: string; saved_path: string }>
+  onDiagnosticsChanged?: () => void
   getAutostart: () => Promise<boolean>
   setAutostart: (enabled: boolean) => Promise<void>
   getAlwaysOnTop: () => Promise<boolean>
@@ -37,6 +39,7 @@ export function mountSettingsPanel(root: HTMLElement, actions: SettingsActions):
     <section class="settings-section"><strong class="behavior-label"></strong><label class="settings-switch"><span><b class="autostart-label"></b><small class="autostart-hint"></small></span><input class="autostart-input" type="checkbox"></label><label class="settings-switch"><span><b class="always-on-top-label"></b><small class="always-on-top-hint"></small></span><input class="always-on-top-input" type="checkbox"></label></section>
     <section class="settings-section"><div class="settings-section-title"><strong class="codex-path-label"></strong><small class="codex-path-hint"></small></div><input class="codex-path-input" type="text" spellcheck="false"><div class="settings-row settings-path-actions"><button class="settings-path-save" type="button"></button><button class="settings-path-clear" type="button"></button></div><small class="codex-path-status"></small></section>
     <section class="settings-section"><strong class="updates-label"></strong><div class="settings-row"><span><b class="check-updates-label"></b><small class="update-status"></small></span><button class="settings-update-button" type="button"></button></div></section>
+    <section class="settings-section"><div class="settings-section-title"><strong class="diagnostics-label"></strong><small class="diagnostics-hint"></small></div><div class="settings-row settings-diagnostics-actions"><button class="settings-update-button diagnostics-generate" type="button"></button><button class="settings-update-button diagnostics-copy" type="button" hidden></button></div><small class="diagnostics-status" role="status"></small><textarea class="diagnostics-preview" readonly hidden></textarea></section>
     <section class="settings-section settings-about"><strong class="about-label"></strong><a href="https://github.com/nf2huochao/Codex-QuotaOrb" target="_blank" rel="noreferrer"><span class="github-label"></span><small>github.com/nf2huochao/Codex-QuotaOrb</small></a><a href="mailto:huochao1210@gmail.com"><span class="contact-label"></span><small>huochao1210@gmail.com</small></a><small class="license-label"></small><small class="privacy-label"></small></section>
   </section>`
 
@@ -45,6 +48,10 @@ export function mountSettingsPanel(root: HTMLElement, actions: SettingsActions):
   const languageButton = root.querySelector<HTMLButtonElement>('.settings-language')!
   const updateButton = root.querySelector<HTMLButtonElement>('.settings-update-button')!
   const updateStatus = root.querySelector<HTMLElement>('.update-status')!
+  const diagnosticsGenerate = root.querySelector<HTMLButtonElement>('.diagnostics-generate')!
+  const diagnosticsCopy = root.querySelector<HTMLButtonElement>('.diagnostics-copy')!
+  const diagnosticsStatus = root.querySelector<HTMLElement>('.diagnostics-status')!
+  const diagnosticsPreview = root.querySelector<HTMLTextAreaElement>('.diagnostics-preview')!
   const autostartInput = root.querySelector<HTMLInputElement>('.autostart-input')!
   const alwaysOnTopInput = root.querySelector<HTMLInputElement>('.always-on-top-input')!
   const codexPathInput = root.querySelector<HTMLInputElement>('.codex-path-input')!
@@ -85,6 +92,10 @@ export function mountSettingsPanel(root: HTMLElement, actions: SettingsActions):
     root.querySelector<HTMLElement>('.updates-label')!.textContent = t('updates', language)
     root.querySelector<HTMLElement>('.check-updates-label')!.textContent = t('checkUpdates', language)
     updateButton.textContent = t('checkUpdates', language)
+    root.querySelector<HTMLElement>('.diagnostics-label')!.textContent = t('diagnosticsTitle', language)
+    root.querySelector<HTMLElement>('.diagnostics-hint')!.textContent = t('diagnosticsHint', language)
+    diagnosticsGenerate.textContent = t('generateDiagnostics', language)
+    diagnosticsCopy.textContent = t('copyDiagnostics', language)
     root.querySelector<HTMLElement>('.about-label')!.textContent = t('about', language)
     root.querySelector<HTMLElement>('.github-label')!.textContent = t('githubRepo', language)
     root.querySelector<HTMLElement>('.contact-label')!.textContent = t('contactMe', language)
@@ -96,15 +107,36 @@ export function mountSettingsPanel(root: HTMLElement, actions: SettingsActions):
   languageButton.addEventListener('click', () => { toggleLanguage() })
   root.querySelector<HTMLButtonElement>('.settings-back')!.addEventListener('click', actions.onClose)
   root.querySelector<HTMLButtonElement>('.settings-reset-theme')!.addEventListener('click', () => { setTheme('sage'); renderThemes() })
-  autostartInput.addEventListener('change', () => { void actions.setAutostart(autostartInput.checked).catch(() => { autostartInput.checked = !autostartInput.checked }) })
-  alwaysOnTopInput.addEventListener('change', () => { void actions.setAlwaysOnTop(alwaysOnTopInput.checked).catch(() => { alwaysOnTopInput.checked = !alwaysOnTopInput.checked }) })
+  const bindSwitch = (input: HTMLInputElement, read: () => Promise<boolean>, write: (value: boolean) => Promise<void>) => {
+    input.disabled = true
+    void read().then(value => { input.checked = value }).catch(() => {
+      input.title = t('settingsReadFailed', language)
+    }).finally(() => { input.disabled = false })
+    input.addEventListener('change', async () => {
+      if (input.disabled) return
+      const requested = input.checked
+      input.disabled = true
+      try { await write(requested); input.title = '' } catch {
+        input.checked = !requested
+        input.title = t('settingsSaveFailed', language)
+        codexPathStatus.textContent = t('settingsSaveFailed', language)
+      } finally { input.disabled = false }
+    })
+  }
+  bindSwitch(autostartInput, actions.getAutostart, actions.setAutostart)
+  bindSwitch(alwaysOnTopInput, actions.getAlwaysOnTop, actions.setAlwaysOnTop)
+  const lockPath = (busy: boolean) => {
+    codexPathInput.disabled = busy
+    codexPathSave.disabled = busy
+    codexPathClear.disabled = busy
+  }
   codexPathSave.addEventListener('click', async () => {
     const path = codexPathInput.value.trim()
     if (!path) {
       codexPathStatus.textContent = t('codexPathRequired', language)
       return
     }
-    codexPathSave.disabled = true
+    lockPath(true)
     codexPathStatus.textContent = t('validatingCodexPath', language)
     try {
       const saved = await actions.setCodexBinaryPath(path)
@@ -113,11 +145,11 @@ export function mountSettingsPanel(root: HTMLElement, actions: SettingsActions):
     } catch (error) {
       codexPathStatus.textContent = error instanceof Error ? error.message : String(error)
     } finally {
-      codexPathSave.disabled = false
+      lockPath(false)
     }
   })
   codexPathClear.addEventListener('click', async () => {
-    codexPathClear.disabled = true
+    lockPath(true)
     try {
       await actions.clearCodexBinaryPath()
       codexPathInput.value = ''
@@ -125,7 +157,7 @@ export function mountSettingsPanel(root: HTMLElement, actions: SettingsActions):
     } catch (error) {
       codexPathStatus.textContent = error instanceof Error ? error.message : String(error)
     } finally {
-      codexPathClear.disabled = false
+      lockPath(false)
     }
   })
   updateButton.addEventListener('click', async () => {
@@ -133,11 +165,43 @@ export function mountSettingsPanel(root: HTMLElement, actions: SettingsActions):
     updateStatus.textContent = t('checkingUpdates', language)
     try { await actions.onCheckUpdates() } finally { updateButton.disabled = false; updateStatus.textContent = '' }
   })
+  diagnosticsGenerate.addEventListener('click', async () => {
+    diagnosticsGenerate.disabled = true
+    diagnosticsCopy.hidden = true
+    diagnosticsPreview.hidden = true
+    diagnosticsPreview.value = ''
+    diagnosticsStatus.textContent = t('diagnosticsGenerating', language)
+    try {
+      const report = await actions.onGenerateDiagnosticReport()
+      diagnosticsPreview.value = report.text
+      diagnosticsPreview.hidden = false
+      diagnosticsCopy.hidden = false
+      diagnosticsStatus.textContent = report.saved_path
+        ? `${t('diagnosticsSaved', language)} ${report.saved_path}`
+        : t('diagnosticsPreviewOnly', language)
+      actions.onDiagnosticsChanged?.()
+    } catch (error) {
+      diagnosticsStatus.textContent = `${t('diagnosticsFailed', language)}：${error instanceof Error ? error.message : String(error)}`
+    } finally {
+      diagnosticsGenerate.disabled = false
+    }
+  })
+  diagnosticsCopy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(diagnosticsPreview.value)
+      diagnosticsStatus.textContent = t('diagnosticsCopied', language)
+    } catch {
+      diagnosticsStatus.textContent = t('diagnosticsCopyFailed', language)
+      diagnosticsPreview.focus()
+      diagnosticsPreview.select()
+    }
+  })
   window.addEventListener(THEME_EVENT, renderThemes)
   renderCopy()
-  void actions.getAutostart().then((value) => { autostartInput.checked = value }).catch(() => undefined)
-  void actions.getAlwaysOnTop().then((value) => { alwaysOnTopInput.checked = value }).catch(() => undefined)
-  void actions.getCodexBinaryPath().then((value) => { codexPathInput.value = value ?? '' }).catch(() => undefined)
+  lockPath(true)
+  void actions.getCodexBinaryPath().then((value) => { codexPathInput.value = value ?? '' })
+    .catch(() => { codexPathStatus.textContent = t('settingsReadFailed', language) })
+    .finally(() => { lockPath(false) })
 
   return {
     update(_snapshot: Snapshot) {},

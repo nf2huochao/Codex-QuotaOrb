@@ -34,16 +34,17 @@ pub struct LanState {
 struct PairAttempts {
     window_started: Instant,
     failures: u8,
+    generation: String,
 }
 
 impl PairAttempts {
-    fn failed(&mut self) -> bool {
-        if self.window_started.elapsed() >= Duration::from_secs(60) {
+    fn blocked(&mut self, generation: &str) -> bool {
+        if self.generation != generation || self.window_started.elapsed() >= Duration::from_secs(60) {
             self.window_started = Instant::now();
             self.failures = 0;
+            self.generation = generation.to_owned();
         }
-        self.failures = self.failures.saturating_add(1);
-        self.failures > 5
+        self.failures >= 5
     }
 }
 
@@ -273,6 +274,7 @@ pub fn router(
             pair_attempts: Arc::new(Mutex::new(PairAttempts {
                 window_started: Instant::now(),
                 failures: 0,
+                generation: String::new(),
             })),
         })
 }
@@ -307,15 +309,12 @@ fn authorized(headers: &HeaderMap, query: &PairQuery, pairing: &PairingState) ->
 
 async fn pair(State(state): State<LanState>, Json(request): Json<PairRequest>) -> Response {
     let pairing = state.pairing.read().expect("pairing lock").clone();
+    let mut attempts = state.pair_attempts.lock().expect("pair attempts lock");
+    if attempts.blocked(&pairing.session_token) {
+        return (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, "60")], "尝试次数过多，请稍后重试").into_response();
+    }
     if request.code.trim() != pairing.code {
-        if state
-            .pair_attempts
-            .lock()
-            .expect("pair attempts lock")
-            .failed()
-        {
-            return (StatusCode::TOO_MANY_REQUESTS, "尝试次数过多，请稍后重试").into_response();
-        }
+        attempts.failures += 1;
         return (StatusCode::UNAUTHORIZED, "配对码不正确").into_response();
     }
     (
@@ -943,7 +942,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repeated_bad_pairing_attempts_are_throttled_without_locking_out_the_real_code() {
+    async fn repeated_bad_pairing_attempts_block_even_correct_guesses() {
         let pairing = Arc::new(RwLock::new(PairingState {
             code: "1234".into(),
             session_token: "secret".into(),
@@ -983,7 +982,19 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "60");
+    }
+
+    #[test]
+    fn pairing_cooldown_expires_and_rotation_resets_it() {
+        let mut attempts = PairAttempts { window_started: Instant::now(), failures: 5, generation: "old".into() };
+        assert!(attempts.blocked("old"));
+        assert!(!attempts.blocked("new"));
+        attempts.failures = 5;
+        attempts.window_started = Instant::now() - Duration::from_secs(61);
+        assert!(!attempts.blocked("new"));
+        assert_eq!(attempts.failures, 0);
     }
 
     #[tokio::test]

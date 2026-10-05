@@ -44,3 +44,15 @@ test('single click does not advance; double click cycles the three views', async
   await expect(page.locator('#island-root')).toBeHidden()
   await expect(page.locator('#details-root')).toBeHidden()
 })
+
+test('settings can generate and preview a diagnostic report without uploading it', async ({ page }) => {
+  await page.goto('/?design-preview=1')
+  await page.locator('.floating-ball').dispatchEvent('dblclick')
+  await page.locator('.island-shell').dispatchEvent('dblclick')
+  await page.locator('.details-panel .settings-button').click()
+  await expect(page.locator('.diagnostics-preview')).toBeHidden()
+  await page.locator('.diagnostics-generate').click()
+  await expect(page.locator('.diagnostics-preview')).toBeVisible()
+  await expect(page.locator('.diagnostics-preview')).toHaveValue(/Codex QuotaOrb diagnostic report/)
+  await expect(page.locator('.diagnostics-status')).toContainText('未保存文件')
+})

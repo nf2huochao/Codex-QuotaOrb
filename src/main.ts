@@ -42,6 +42,7 @@ let snapshotQueueTimer: number | undefined
 let lastChangedAt = snapshot.changedAt ?? 0
 const REFRESH_TIMEOUT_MS = 35_000
 const ALWAYS_ON_TOP_STORAGE_KEY = 'codex-always-on-top'
+const UPDATE_PROMPTED_VERSION_STORAGE_KEY = 'codex-update-prompted-version'
 
 app.innerHTML = '<div class="app-frame"><div id="ball-root"></div><div id="island-root" hidden></div><div id="details-root" hidden></div><div id="settings-root" hidden></div></div>'
 const ballRoot = document.querySelector<HTMLElement>('#ball-root')!
@@ -54,7 +55,9 @@ function resizeWindow(width: number, height: number, expanded: boolean) {
   const target = `${width}x${height}x${expanded}`
   if (target === resizeTarget) return
   resizeTarget = target
-  void invoke('set_window_expanded', { expanded, width, height }).catch(() => undefined)
+  void invoke('set_window_expanded', { expanded, width, height }).catch(() => {
+    if (resizeTarget === target) resizeTarget = ''
+  })
 }
 
 function activeView(): MountedView | undefined {
@@ -139,25 +142,31 @@ function restoreAlwaysOnTopSetting() {
 }
 
 let checkingUpdates = false
-async function runUpdateCheck() {
+async function runUpdateCheck(manual = true) {
   if (checkingUpdates) return
   checkingUpdates = true
+  let installing = false
   try {
     const result = await invoke<{ message: string; available: boolean; latest_version: string | null }>('check_for_updates')
     const english = getLanguage() === 'en-US'
     if (!result.available) {
-      window.alert(english ? 'You are up to date.' : result.message)
+      if (manual) window.alert(english ? 'You are up to date.' : result.message)
       return
     }
+    if (!manual && window.localStorage.getItem(UPDATE_PROMPTED_VERSION_STORAGE_KEY) === result.latest_version) return
+    if (result.latest_version) window.localStorage.setItem(UPDATE_PROMPTED_VERSION_STORAGE_KEY, result.latest_version)
     const confirmed = window.confirm(english
       ? `Version ${result.latest_version} is available. Download and install now? The app will restart.`
       : `发现新版本 ${result.latest_version}，现在下载并安装吗？安装完成后悬浮窗会重启。`)
     if (!confirmed) return
+    installing = true
     await invoke('install_update', { expectedVersion: result.latest_version })
     await invoke('relaunch_app')
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    window.alert(`${t('updateCheckFailed')}：${message}`)
+    if (manual || installing) {
+      const message = error instanceof Error ? error.message : String(error)
+      window.alert(`${t('updateCheckFailed')}：${message}`)
+    }
   } finally {
     checkingUpdates = false
   }
@@ -203,6 +212,10 @@ function renderView() {
     if (!settingsView) settingsView = mountSettingsPanel(settingsRoot, {
       onClose: () => { viewState = 'details'; renderView() },
       onCheckUpdates: runUpdateCheck,
+      onGenerateDiagnosticReport: () => designPreview
+        ? Promise.resolve({ text: 'Codex QuotaOrb diagnostic report\nDesign preview: no file saved.\n', saved_path: '' })
+        : invoke<{ text: string; saved_path: string }>('generate_diagnostic_report'),
+      onDiagnosticsChanged: scheduleSettingsResize,
       getAutostart: getAutostartSetting,
       setAutostart: setAutostartSetting,
       getAlwaysOnTop: getAlwaysOnTopSetting,
@@ -322,9 +335,8 @@ if (!designPreview) {
   void listen<string>('autostart-error', (event) => {
     window.alert(`${t('autostartFailed')}：${event.payload}`)
   })
-  void listen('update-check-requested', async () => {
-    await runUpdateCheck()
-  })
+  void listen('update-check-requested', () => { void runUpdateCheck() })
+  window.setTimeout(() => { void runUpdateCheck(false) }, 3_000)
   window.setInterval(refresh, 120_000)
   window.setInterval(() => { void refreshResetForecast() }, 300_000)
 }

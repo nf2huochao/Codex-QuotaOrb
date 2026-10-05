@@ -296,7 +296,10 @@ fn parse_lines(text: &str, state: &mut FileState, now: i64) {
             )
             .or_else(|| string_field(&value, &["session_id", "sessionId"]));
         }
-        if let Some(title) = user_title(&value) {
+        let previous_status = state.status;
+        let previous_activity_at = state.activity_at;
+        let has_request = user_title(&value);
+        if let Some(title) = has_request.clone() {
             state.activity = Some(title);
             state.status = TaskStatus::Running;
             state.waiting_reason = None;
@@ -312,8 +315,18 @@ fn parse_lines(text: &str, state: &mut FileState, now: i64) {
         if let Some(tokens) = token_count(&value) {
             state.token_count = Some(tokens);
         }
-        if state.activity.is_some() || state.waiting_reason.is_some() || state.token_count.is_some()
-        {
+        let record_type = value.get("type").and_then(Value::as_str).unwrap_or("");
+        let payload_type = payload.get("type").and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
+        // Usage and metadata are not lifecycle evidence. Activity must work
+        // even when the bounded read skipped the original user request.
+        let new_start = matches!(payload_type.as_str(), "task_started" | "turn_started") || record_type == "turn_context";
+        let valid_activity = is_running_event(record_type, &payload_type)
+            && (new_start || has_request.is_some()
+                || !(previous_status == TaskStatus::Completed || (previous_status == TaskStatus::None && previous_activity_at > 0)));
+        if has_request.is_some() || valid_activity
+            || is_completion_event(record_type, &payload_type)
+            || is_inactive_event(record_type, &payload_type)
+            || is_approval_value(&value) {
             state.updated_at = state
                 .updated_at
                 .max(timestamp(&value).unwrap_or(state.modified_at.min(now)));
@@ -389,6 +402,12 @@ fn update_status(value: &Value, state: &mut FileState) {
             "function_call_output" | "custom_tool_call_output"
         );
     if resolves_wait || is_running_event(record_type, &payload_type) {
+        let explicit_start = matches!(payload_type.as_str(), "task_started" | "turn_started")
+            || record_type == "turn_context";
+        if (state.status == TaskStatus::Completed || (state.status == TaskStatus::None && state.activity_at > 0))
+            && !explicit_start && !resolves_wait {
+            return;
+        }
         if state.status == TaskStatus::NeedsAction
             && !resolves_wait
             && !matches!(payload_type.as_str(), "task_started" | "turn_started")
@@ -543,6 +562,9 @@ fn token_count(value: &Value) -> Option<u64> {
             .or_else(|| value.as_i64().map(|v| v.max(0) as u64))
     }
     let payload = value.get("payload").unwrap_or(value);
+    for pointer in ["/info/total_token_usage/total_tokens", "/thread_token_usage/total_tokens", "/token_count/total_tokens", "/tokenUsage/total/totalTokens"] {
+        if let Some(total) = payload.pointer(pointer).and_then(number) { return Some(total); }
+    }
     let candidate = payload
         .get("token_count")
         .or_else(|| payload.get("tokenCount"))
@@ -552,8 +574,7 @@ fn token_count(value: &Value) -> Option<u64> {
         return Some(value);
     }
     let total = candidate
-        .get("total")?
-        .get("totalTokens")
+        .get("total").and_then(|v| v.get("totalTokens"))
         .or_else(|| candidate.get("total_tokens"))?;
     number(total)
 }
@@ -580,6 +601,78 @@ fn string_field(value: &Value, keys: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
     use std::{fs::OpenOptions, io::Write};
+
+    #[test]
+    fn bounded_tail_activity_survives_missing_request_and_registry_filter() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("large.jsonl");
+        let mut file = File::create(&path).unwrap();
+        writeln!(file, "{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"large\"}}}}").unwrap();
+        let padding = format!("{{\"type\":\"padding\",\"payload\":\"{}\"}}\n", "x".repeat(4096));
+        for _ in 0..40 { file.write_all(padding.as_bytes()).unwrap(); }
+        writeln!(file, "{{\"timestamp\":1,\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\"}}}}").unwrap();
+        writeln!(file, "{{\"timestamp\":1,\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\",\"message\":\"hidden request\"}}}}").unwrap();
+        for _ in 0..220 { file.write_all(padding.as_bytes()).unwrap(); }
+        writeln!(file, "{{\"timestamp\":100000,\"type\":\"response_item\",\"payload\":{{\"type\":\"reasoning\"}}}}").unwrap();
+        let mut watcher = RolloutWatcher::new(root.path().into());
+        let tasks = watcher.scan(100000);
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].status, TaskStatus::Running);
+        assert!(tasks[0].activity.is_none());
+        assert!(tasks[0].token_count.is_none());
+        let mut registry = crate::task_registry::TaskRegistry::default();
+        registry.replace_source_tasks("local-session", tasks, 100000);
+        assert_eq!(registry.tasks().len(), 1);
+        let mut append = OpenOptions::new().append(true).open(&path).unwrap();
+        let old = UNIX_EPOCH + std::time::Duration::from_secs(1);
+        let line = "{\"timestamp\":101000,\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\"}}\n";
+        append.write_all(&line.as_bytes()[..30]).unwrap();
+        append.set_modified(old).unwrap();
+        assert!(watcher.scan(101000).iter().all(|task| task.status != TaskStatus::Running));
+        append.write_all(&line.as_bytes()[30..]).unwrap();
+        append.set_modified(old).unwrap();
+        let tasks = watcher.scan(101001);
+        assert_eq!(tasks[0].status, TaskStatus::Running);
+        assert_eq!(tasks[0].updated_at, 101000);
+    }
+
+    #[test]
+    fn usage_does_not_refresh_or_revive_terminal_lifecycle() {
+        let mut state = FileState::default();
+        parse_lines("{\"timestamp\":100,\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\"}}\n", &mut state, 100);
+        parse_lines("{\"timestamp\":200,\"type\":\"token_usage_record\",\"payload\":{\"thread_token_usage\":{\"total_tokens\":42}}}\n", &mut state, 200);
+        assert_eq!(state.status, TaskStatus::Completed);
+        assert_eq!(state.updated_at, 100);
+        parse_lines("{\"timestamp\":202,\"type\":\"response_item\",\"payload\":{\"type\":\"reasoning\"}}\n", &mut state, 202);
+        assert_eq!(state.status, TaskStatus::Completed);
+        assert_eq!(state.updated_at, 100);
+        parse_lines("{\"timestamp\":203,\"type\":\"event_msg\",\"payload\":{\"type\":\"turn_started\",\"turn_id\":\"new\"}}\n", &mut state, 203);
+        assert_eq!(state.status, TaskStatus::Running);
+        assert_eq!(state.updated_at, 203);
+        assert_eq!(state.token_count, Some(42));
+        parse_lines("{\"timestamp\":201,\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"total_tokens\":43}}}}\n", &mut state, 201);
+        assert_eq!(state.token_count, Some(43));
+        assert_eq!(state.updated_at, 203);
+    }
+
+    #[test]
+    #[ignore = "read-only real session validation"]
+    fn actual_missing_task_enters_registry() {
+        let id = "01a0a2a2-6b1e-70b0-859b-276fce495c4e";
+        let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        let mut watcher = RolloutWatcher::new(default_root());
+        let start = std::time::Instant::now();
+        let tasks = watcher.scan(now);
+        let cold = start.elapsed();
+        let task = tasks.iter().find(|t| t.id == id).expect("real task absent from watcher");
+        println!("target_status={:?} age={} token_present={} cold_ms={}", task.status, now-task.updated_at, task.token_count.is_some(), cold.as_millis());
+        let mut registry = crate::task_registry::TaskRegistry::default();
+        registry.replace_source_tasks("local-session", tasks, now);
+        assert!(registry.tasks().iter().any(|t| t.id == id));
+        let start = std::time::Instant::now();
+        watcher.scan(now+1);
+        println!("warm_ms={} files={}", start.elapsed().as_millis(), watcher.files.len());
+    }
 
     #[test]
     #[ignore = "read-only local session timing; reports counts only"]

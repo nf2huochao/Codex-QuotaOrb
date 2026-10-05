@@ -1,5 +1,6 @@
 pub(crate) mod codex_client;
 pub(crate) mod codex_protocol;
+pub(crate) mod diagnostic_report;
 pub(crate) mod diagnostics;
 pub(crate) mod domain;
 pub(crate) mod hook_bridge;
@@ -70,6 +71,21 @@ fn read_codex_override() -> Option<PathBuf> {
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
         .filter(|path| path.is_file())
+}
+
+fn codex_binary_mode() -> diagnostic_report::CodexBinaryMode {
+    let configured = std::fs::read(codex_settings_path())
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<CodexSettings>(&bytes).ok())
+        .and_then(|settings| settings.codex_binary)
+        .filter(|value| !value.trim().is_empty());
+    match configured {
+        None => diagnostic_report::CodexBinaryMode::Automatic,
+        Some(path) if Path::new(&path).is_file() => {
+            diagnostic_report::CodexBinaryMode::UserSelectedAvailable
+        }
+        Some(_) => diagnostic_report::CodexBinaryMode::UserSelectedMissing,
+    }
 }
 
 fn write_codex_override(path: Option<&Path>) -> Result<(), String> {
@@ -168,6 +184,23 @@ fn reset_pairing(state: tauri::State<'_, AppState>) -> Result<lan_server::Pairin
 #[tauri::command]
 fn get_snapshot(state: tauri::State<'_, AppState>) -> domain::Snapshot {
     state.store.current()
+}
+
+#[tauri::command]
+async fn generate_diagnostic_report(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<diagnostic_report::SavedReport, String> {
+    let snapshot = state.store.current();
+    let connected = state.client.lock().await.is_some();
+    let generated_at = now();
+    let text =
+        diagnostic_report::build_report(&snapshot, connected, codex_binary_mode(), generated_at);
+    let directory = app
+        .path()
+        .download_dir()
+        .map_err(|_| "无法找到下载文件夹".to_owned())?;
+    diagnostic_report::save_report(&directory, text, generated_at)
 }
 
 #[tauri::command]
@@ -345,6 +378,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            generate_diagnostic_report,
             get_pairing_info,
             reset_pairing,
             check_for_updates,
