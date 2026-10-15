@@ -17,6 +17,7 @@ const READ_FAILURE_GRACE_SECONDS: i64 = 5;
 
 #[derive(Debug, Clone)]
 struct FileState {
+    internal_review: bool,
     offset: u64,
     session_id: Option<String>,
     activity: Option<String>,
@@ -35,6 +36,7 @@ struct FileState {
 impl Default for FileState {
     fn default() -> Self {
         Self {
+            internal_review: false,
             offset: 0,
             session_id: None,
             activity: None,
@@ -99,6 +101,9 @@ impl RolloutWatcher {
             }) else {
                 continue;
             };
+            if state.internal_review {
+                continue;
+            }
             let file_id = session_id_from_filename(&path);
             let Some(id) = file_id
                 .clone()
@@ -186,6 +191,7 @@ impl RolloutWatcher {
                 state.offset = tail_start;
             }
         } else if len < state.offset {
+            state.internal_review = false;
             state.offset = 0;
             state.session_id = None;
             state.activity = None;
@@ -283,6 +289,16 @@ fn parse_lines(text: &str, state: &mut FileState, now: i64) {
             continue;
         };
         let payload = value.get("payload").unwrap_or(&value);
+        // Classify by provenance, never by a user-controlled task title.
+        if value.get("type").and_then(Value::as_str) == Some("session_meta")
+            && (payload.get("thread_source").and_then(Value::as_str) == Some("guardian_review")
+                || payload.pointer("/source/subagent/other").and_then(Value::as_str) == Some("guardian"))
+        {
+            state.internal_review = true;
+        }
+        if state.internal_review {
+            continue;
+        }
         if state.session_id.is_none() {
             let is_session_meta =
                 payload.get("type").and_then(Value::as_str) == Some("session_meta");
@@ -601,6 +617,48 @@ fn string_field(value: &Value, keys: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
     use std::{fs::OpenOptions, io::Write};
+
+    #[test]
+    fn internal_reviews_never_enter_task_registry_but_real_tasks_still_do() {
+        let root = tempfile::tempdir().unwrap();
+        let now = 100000;
+        for (id, provenance) in [
+            ("guardian-source", serde_json::json!({"source":{"subagent":{"other":"guardian"}}})),
+            ("guardian-thread", serde_json::json!({"thread_source":"guardian_review"})),
+            // A real user task with the same display title must remain visible.
+            ("user", serde_json::json!({"source":"cli"})),
+            ("worker", serde_json::json!({"source":{"subagent":{"other":"worker"}}})),
+        ] {
+            let mut payload = provenance;
+            payload["id"] = serde_json::json!(id);
+            let mut file = File::create(root.path().join(format!("{id}.jsonl"))).unwrap();
+            writeln!(file, "{}", serde_json::json!({"type":"session_meta","payload":payload})).unwrap();
+            // Ensure cold reads skip the middle and retain the header classification.
+            if id.starts_with("guardian") {
+                let padding = serde_json::json!({"type":"padding","payload":"x".repeat(4096)});
+                for _ in 0..240 { writeln!(file, "{padding}").unwrap(); }
+            }
+            writeln!(file, "{}", serde_json::json!({"timestamp":now,"type":"response_item","payload":{"type":"message","role":"user","content":"Guardian review"}})).unwrap();
+            writeln!(file, "{}", serde_json::json!({"timestamp":now,"type":"event_msg","payload":{"type":"task_started"}})).unwrap();
+        }
+        let mut watcher = RolloutWatcher::new(root.path().into());
+        let running = watcher.scan(now);
+        assert_eq!(running.len(), 2);
+        assert!(running.iter().all(|t| t.status == TaskStatus::Running));
+        assert!(running.iter().any(|t| t.id == "user" && t.title == "Guardian review"));
+        assert!(running.iter().any(|t| t.id == "worker"));
+        for id in ["guardian-source", "guardian-thread", "user", "worker"] {
+            let mut file = OpenOptions::new().append(true).open(root.path().join(format!("{id}.jsonl"))).unwrap();
+            writeln!(file, "{}", serde_json::json!({"timestamp":now+1,"type":"event_msg","payload":{"type":"task_complete"}})).unwrap();
+        }
+        let completed = watcher.scan(now+1);
+        assert_eq!(completed.len(), 2);
+        assert!(completed.iter().all(|t| t.status == TaskStatus::Completed));
+        let mut registry = crate::task_registry::TaskRegistry::default();
+        registry.replace_source_tasks("local-session", completed, now+1);
+        assert_eq!(registry.tasks().len(), 2);
+        assert!(registry.tasks().iter().all(|t| !t.id.starts_with("guardian")));
+    }
 
     #[test]
     fn bounded_tail_activity_survives_missing_request_and_registry_filter() {

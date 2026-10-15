@@ -4,6 +4,14 @@ All notable changes to Codex QuotaOrb are documented here in Chinese and English
 
 Codex 额度悬浮窗的主要新增、改进和修复均在此以中英文记录。
 
+## v1.0.6 — 2026-10-15
+
+### Fixed / 修复
+
+- Filter internal Guardian approval-review sessions out of the task list and task counts using session provenance metadata. They no longer appear as completed tasks awaiting acceptance. / 根据会话来源标记过滤 Guardian 内部操作审批会话，不再把它们计入普通任务或显示为“已完成，可验收”。
+- Preserve ordinary user conversations, including conversations titled “Guardian review”, and other worker sessions. / 保留普通用户对话（包括标题为“Guardian review”的对话）及其他工作代理会话。
+- Cover bounded large-log reads, incremental completion updates and task-registry filtering with a regression test. / 回归验证有界大日志读取、增量完成事件及任务注册表过滤。
+
 ## v1.0.5 — 2026-10-05
 
 ### Fixed / 修复

@@ -52,13 +52,10 @@ jobs:
           releaseBody: |
             ## 本次更新 / Release notes
 
-            - 设置页增加一键生成脱敏诊断报告：本地保存、先预览、由用户自行决定是否发送。
-            - 每次启动后只检查一次新版本；仅发现新版本时提醒，安装仍需确认。
-            - 修复大日志中正在运行的对话漏同步；兼容实际 Token 统计格式，统计记录不会复活已完成任务。
-            - 修复配对试错限制绕过、设置连续操作冲突与旧诊断报告残留。
-            - Added a local, redacted diagnostic report with a reviewable preview and no automatic upload.
-            - Checks for updates once after launch; only new versions prompt, and installation requires consent.
-            - Fixes active task discovery in large logs, token record compatibility, pairing cooldown and settings races.
+            - 过滤 Guardian 内部操作审批会话，不再将其显示为普通任务或“可验收”卡片。
+            - 根据会话来源识别，保留普通同名对话及其他工作代理任务。
+            - Filters internal Guardian approval-review sessions from task lists and counts.
+            - Uses session provenance, preserving ordinary same-title conversations and other worker tasks.
             - Windows includes updater-signed artifacts. The Apple Silicon macOS package is not Apple-notarized and remains a test build.
 
             详细说明见仓库中的 CHANGELOG.md。

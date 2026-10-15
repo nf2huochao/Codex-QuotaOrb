@@ -50,6 +50,8 @@ Double-click the orb to cycle through the orb, capsule, and details views.
 
 The settings page keeps theme, startup, always-on-top, update, repository, and contact controls together.
 
+v1.0.6 filters internal Guardian approval-review sessions from task lists, removing internal cards that do not need user acceptance while preserving ordinary conversations and other worker tasks.
+
 v1.0.5 adds a local diagnostic report in Settings, checks for updates once after launch, and fixes active conversations missing from large session logs. Generate a report, review the preview, and choose whether to share the saved file; no report is uploaded automatically.
 
 ## What's new in v1.0.4
