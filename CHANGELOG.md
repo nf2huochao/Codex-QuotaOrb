@@ -6,6 +6,8 @@ Codex 额度悬浮窗的主要新增、改进和修复均在此以中英文记�
 
 ## v1.0.6 — 2026-10-15
 
+Rebuilt on 2026-10-16 / 2026-10-16 覆盖重建：统一按已确认会话来源过滤日志、Hook、轮询和缓存任务，内部及未知来源会话不再进入普通列表或计数。已安装旧1.0.6的用户需要手动下载安装，版本号未变，不会触发版本升级提示。 / The rebuilt package admits only verified public sessions across every snapshot ingress. Existing 1.0.6 installations require a manual reinstall because the version number is unchanged.
+
 ### Fixed / 修复
 
 - Filter internal Guardian approval-review sessions out of the task list and task counts using session provenance metadata. They no longer appear as completed tasks awaiting acceptance. / 根据会话来源标记过滤 Guardian 内部操作审批会话，不再把它们计入普通任务或显示为“已完成，可验收”。

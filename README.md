@@ -50,7 +50,7 @@ Double-click the orb to cycle through the orb, capsule, and details views.
 
 The settings page keeps theme, startup, always-on-top, update, repository, and contact controls together.
 
-v1.0.6 filters internal Guardian approval-review sessions from task lists, removing internal cards that do not need user acceptance while preserving ordinary conversations and other worker tasks.
+v1.0.6 was rebuilt on 2026-10-16 to admit only verified public sessions across logs, Hook events, and cached snapshots. Internal review, message suggestions, implementation subagents, and unknown origins stay out of ordinary task lists and counts; user chats, automations, and named team chats remain supported. Existing 1.0.6 users must manually reinstall the rebuilt package because the version is unchanged.
 
 v1.0.5 adds a local diagnostic report in Settings, checks for updates once after launch, and fixes active conversations missing from large session logs. Generate a report, review the preview, and choose whether to share the saved file; no report is uploaded automatically.
 

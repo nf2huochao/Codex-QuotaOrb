@@ -56,10 +56,11 @@ jobs:
           releaseBody: |
             ## 本次更新 / Release notes
 
-            - 过滤 Guardian 内部操作审批会话，不再将其显示为普通任务或“可验收”卡片。
-            - 根据会话来源识别，保留普通同名对话及其他工作代理任务。
-            - Filters internal Guardian approval-review sessions from task lists and counts.
-            - Uses session provenance, preserving ordinary same-title conversations and other worker tasks.
+            - 2026-10-16覆盖重建：统一过滤日志、Hook通知、轮询和缓存中的内部及未知来源会话，不再混入普通任务或计数。
+            - 保留用户对话、自动化和正式团队对话；新对话需等待来源扫描确认。
+            - 已安装旧1.0.6的用户需手动下载安装新包，同版本不会触发升级提示。
+            - Rebuilt on 2026-10-16 with verified public-session admission across all snapshot sources.
+            - Preserves user chats, automations, and named team chats. Existing 1.0.6 users must manually reinstall this rebuilt package.
             - Windows includes updater-signed artifacts. The Apple Silicon macOS package is not Apple-notarized and remains a test build.
 
             详细说明见仓库中的 CHANGELOG.md。
