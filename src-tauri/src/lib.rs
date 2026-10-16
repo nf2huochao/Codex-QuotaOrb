@@ -350,7 +350,7 @@ mod codex_client_tests;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let (store, _) = SnapshotStore::new(empty_snapshot());
+    let (store, _) = SnapshotStore::new_monitored(empty_snapshot());
     let client = Arc::new(AsyncMutex::new(None));
     let hook_bridge = hook_bridge::HookBridge::default();
     let pairing_path = app_config_dir().join("pairing.json");

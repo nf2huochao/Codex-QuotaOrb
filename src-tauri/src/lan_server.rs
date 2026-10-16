@@ -805,6 +805,45 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
     use tower::util::ServiceExt;
+    use std::collections::HashSet;
+
+    #[tokio::test]
+    async fn proven_session_scope_filters_hook_requests_through_real_http_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("user.jsonl"),
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"user\",\"source\":\"vscode\",\"thread_source\":\"user\"}}\n").unwrap();
+        std::fs::write(root.path().join("worker.jsonl"),
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"worker\",\"source\":{\"subagent\":{\"other\":\"new-internal-type\"}}}}\n").unwrap();
+        let mut watcher = crate::rollout_watcher::RolloutWatcher::new(root.path().into());
+        watcher.scan(now());
+        let (store, _) = SnapshotStore::new_monitored(crate::snapshot_store::empty_snapshot());
+        store.set_public_sessions(watcher.public_session_ids());
+        let app = router(store.clone(), Arc::new(RwLock::new(PairingState {
+            code: "1234".into(), session_token: "secret".into(),
+        })), Arc::new(AsyncMutex::new(None)), HookBridge::default());
+        for event in ["UserPromptSubmit", "Stop", "UserPromptSubmit"] {
+            for id in ["suggestion", "worker", "user"] {
+                let body = serde_json::json!({"eventName":event,"payload":{
+                    "session_id":id,"prompt":"This is an app-generated request for a suggested next user message"
+                }});
+                let response = app.clone().oneshot(Request::post("/api/hooks/event")
+                    .header("content-type", "application/json")
+                    .header("x-codex-hook-token", "secret")
+                    .body(Body::from(body.to_string())).unwrap()).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+            }
+            let response = app.clone().oneshot(Request::get("/api/snapshot?pair=secret")
+                .body(Body::empty()).unwrap()).await.unwrap();
+            let bytes = axum::body::to_bytes(response.into_body(), 32768).await.unwrap();
+            let snapshot: Snapshot = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(snapshot.tasks.len(), 1);
+            assert_eq!(snapshot.tasks[0].id, "user");
+            assert_eq!(snapshot.active_task_count, if event == "Stop" { 0 } else { 1 });
+            // Same text in a real user conversation must not trigger a title/content blacklist.
+        }
+        store.set_public_sessions(HashSet::new());
+        assert!(store.current().tasks.is_empty());
+    }
     fn store() -> SnapshotStore {
         SnapshotStore::new(Snapshot {
             status: DataStatus::Stale,

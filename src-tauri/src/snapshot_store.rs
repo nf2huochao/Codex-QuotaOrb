@@ -85,13 +85,14 @@ fn seed_cycle_baseline(mut history: Vec<UsagePoint>, cycle_key: Option<i64>) -> 
 
 #[derive(Clone)]
 pub struct SnapshotStore {
+    public_sessions: Arc<Mutex<Option<HashSet<String>>>>,
     state: Arc<Mutex<Snapshot>>,
     acknowledged: Arc<Mutex<HashSet<String>>>,
     tx: watch::Sender<Snapshot>,
 }
 
 impl SnapshotStore {
-    pub fn new(mut initial: Snapshot) -> (Self, watch::Receiver<Snapshot>) {
+    fn new_unfiltered(mut initial: Snapshot) -> (Self, watch::Receiver<Snapshot>) {
         if initial.schema_version == "1.0" {
             initial.history.clear();
         }
@@ -119,6 +120,7 @@ impl SnapshotStore {
         let (tx, rx) = watch::channel(initial.clone());
         (
             Self {
+                public_sessions: Arc::new(Mutex::new(None)),
                 state: Arc::new(Mutex::new(initial)),
                 acknowledged: Arc::new(Mutex::new(acknowledged)),
                 tx,
@@ -127,11 +129,42 @@ impl SnapshotStore {
         )
     }
 
+    #[cfg(test)]
+    pub fn new(initial: Snapshot) -> (Self, watch::Receiver<Snapshot>) {
+        Self::new_unfiltered(initial)
+    }
+
+    /// Production monitor: no cached/unattributed task can appear at startup.
+    pub fn new_monitored(mut initial: Snapshot) -> (Self, watch::Receiver<Snapshot>) {
+        initial.tasks.clear();
+        let (store, receiver) = Self::new_unfiltered(initial);
+        *store.public_sessions.lock().expect("session scope lock") = Some(HashSet::new());
+        (store, receiver)
+    }
+
+    pub fn set_public_sessions(&self, ids: HashSet<String>) {
+        // Same lock order as publish/update; scope changes and purging are atomic.
+        let mut current = self.state.lock().expect("snapshot lock");
+        {
+            let mut scope = self.public_sessions.lock().expect("session scope lock");
+            if scope.as_ref() == Some(&ids) { return; }
+            *scope = Some(ids);
+        }
+        let next = self.normalize(current.clone(), &current);
+        if *current != next {
+            *current = next.clone();
+            let _ = self.tx.send(next);
+        }
+    }
+
     pub fn current(&self) -> Snapshot {
         self.state.lock().expect("snapshot lock").clone()
     }
 
     fn normalize(&self, mut snapshot: Snapshot, previous_snapshot: &Snapshot) -> Snapshot {
+        if let Some(ids) = self.public_sessions.lock().expect("session scope lock").as_ref() {
+            snapshot.tasks.retain(|task| ids.contains(&task.id));
+        }
         let legacy_schema = snapshot.schema_version == "1.0";
         if legacy_schema {
             snapshot.history.clear();
@@ -415,6 +448,39 @@ pub fn empty_snapshot() -> Snapshot {
 mod tests {
     use super::*;
     use crate::domain::{DataStatus, TaskStatus};
+
+    #[test]
+    fn monitored_store_filters_cache_hooks_and_later_resurrection_before_counting() {
+        let initial = snapshot();
+        let (store, _) = SnapshotStore::new_monitored(initial.clone());
+        assert!(store.current().tasks.is_empty());
+        assert_eq!(store.current().quota_remaining_percent, Some(72));
+        store.set_public_sessions(HashSet::from(["user".into()]));
+        for source in ["hook", "app-server-event", "poll", "history", "local-session"] {
+            store.update(|snapshot| {
+                snapshot.tasks = ["user", "suggestion", "guardian", "unknown"].iter().map(|id| {
+                    let mut task = initial.tasks[0].clone();
+                    task.id = (*id).into();
+                    task.title = "Guardian review".into();
+                    task.source = Some(source.into());
+                    task.status = TaskStatus::Running;
+                    task.approval_request_id = Some("still-must-not-bypass".into());
+                    task
+                }).collect();
+            });
+            let current = store.current();
+            assert_eq!(current.tasks.len(), 1);
+            assert_eq!(current.tasks[0].id, "user");
+            assert_eq!(current.active_task_count, 1);
+            assert_eq!(current.task_counts.running, 1);
+        }
+        // A full cache publish and higher-priority event cannot reintroduce it.
+        store.publish(initial);
+        assert!(store.current().tasks.is_empty());
+        store.set_public_sessions(HashSet::new());
+        assert_eq!(store.current().active_task_count, 0);
+    }
+
     fn snapshot() -> Snapshot {
         Snapshot {
             status: DataStatus::Fresh,

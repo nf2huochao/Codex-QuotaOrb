@@ -469,6 +469,7 @@ pub fn spawn_local_task_loop(store: SnapshotStore) -> tauri::async_runtime::Join
                 break;
             };
             watcher = next_watcher;
+            store.set_public_sessions(watcher.public_session_ids());
             publish_local_tasks(&store, tasks, now);
         }
     })
@@ -476,7 +477,9 @@ pub fn spawn_local_task_loop(store: SnapshotStore) -> tauri::async_runtime::Join
 
 pub fn refresh_local_tasks(store: &SnapshotStore, _previous: &Snapshot, now: i64) -> Snapshot {
     let mut watcher = RolloutWatcher::new(default_root());
-    publish_local_tasks(store, watcher.scan(now), now);
+    let tasks = watcher.scan(now);
+    store.set_public_sessions(watcher.public_session_ids());
+    publish_local_tasks(store, tasks, now);
     store.current()
 }
 

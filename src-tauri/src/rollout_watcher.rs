@@ -17,6 +17,7 @@ const READ_FAILURE_GRACE_SECONDS: i64 = 5;
 
 #[derive(Debug, Clone)]
 struct FileState {
+    public_session: bool,
     internal_review: bool,
     offset: u64,
     session_id: Option<String>,
@@ -36,6 +37,7 @@ struct FileState {
 impl Default for FileState {
     fn default() -> Self {
         Self {
+            public_session: false,
             internal_review: false,
             offset: 0,
             session_id: None,
@@ -101,7 +103,7 @@ impl RolloutWatcher {
             }) else {
                 continue;
             };
-            if state.internal_review {
+            if !state.public_session {
                 continue;
             }
             let file_id = session_id_from_filename(&path);
@@ -162,6 +164,14 @@ impl RolloutWatcher {
         tasks
     }
 
+    /// Provenance, not lifecycle priority or display text, admits a session.
+    pub fn public_session_ids(&self) -> HashSet<String> {
+        self.files.iter().filter_map(|(path, state)| {
+            if !state.public_session { return None; }
+            session_id_from_filename(path).or_else(|| state.session_id.clone())
+        }).collect()
+    }
+
     fn read_file(&mut self, path: &Path, now: i64) -> Option<FileState> {
         let metadata = fs::metadata(path).ok()?;
         let modified_at = metadata
@@ -191,6 +201,7 @@ impl RolloutWatcher {
                 state.offset = tail_start;
             }
         } else if len < state.offset {
+            state.public_session = false;
             state.internal_review = false;
             state.offset = 0;
             state.session_id = None;
@@ -283,25 +294,39 @@ fn session_id_from_filename(path: &Path) -> Option<String> {
     None
 }
 
+fn is_public_session(payload: &Value) -> bool {
+    // Unknown/new origins and all implementation subagents stay out of the
+    // ordinary list. Named team chats created through the app remain public.
+    let source = payload.get("source").and_then(Value::as_str);
+    if !matches!(source, Some("cli" | "vscode" | "exec" | "appServer" | "app_server" | "app-server")) {
+        return false;
+    }
+    match payload.get("thread_source") {
+        None | Some(Value::Null) => true, // legacy ordinary session metadata
+        Some(Value::String(kind)) => matches!(kind.as_str(),
+            "user" | "automation" | "agent_created_thread" | "agent_forked_thread"
+            | "composer_link" | "realtime_voice"),
+        _ => false,
+    }
+}
+
 fn parse_lines(text: &str, state: &mut FileState, now: i64) {
     for line in text.lines() {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             continue;
         };
         let payload = value.get("payload").unwrap_or(&value);
-        // Classify by provenance, never by a user-controlled task title.
-        if value.get("type").and_then(Value::as_str) == Some("session_meta")
-            && (payload.get("thread_source").and_then(Value::as_str) == Some("guardian_review")
-                || payload.pointer("/source/subagent/other").and_then(Value::as_str) == Some("guardian"))
-        {
-            state.internal_review = true;
+        let session_meta = value.get("type").and_then(Value::as_str) == Some("session_meta")
+            || payload.get("type").and_then(Value::as_str) == Some("session_meta");
+        if session_meta {
+            state.public_session = is_public_session(payload);
+            state.internal_review = !state.public_session;
         }
         if state.internal_review {
             continue;
         }
         if state.session_id.is_none() {
-            let is_session_meta =
-                payload.get("type").and_then(Value::as_str) == Some("session_meta");
+            let is_session_meta = session_meta;
             state.session_id = string_field(
                 payload,
                 if is_session_meta {
@@ -619,6 +644,22 @@ mod tests {
     use std::{fs::OpenOptions, io::Write};
 
     #[test]
+    fn session_admission_is_positive_and_not_a_list_of_internal_names() {
+        for kind in ["user", "automation", "agent_created_thread", "agent_forked_thread",
+            "composer_link", "realtime_voice"] {
+            assert!(is_public_session(&serde_json::json!({"source":"vscode","thread_source":kind})));
+        }
+        for metadata in [
+            serde_json::json!({}),
+            serde_json::json!({"source":"future-origin","thread_source":"user"}),
+            serde_json::json!({"source":"vscode","thread_source":"future-internal"}),
+            serde_json::json!({"source":"vscode","thread_source":"subagent"}),
+            serde_json::json!({"source":{"subagent":{"thread_spawn":{}}},"thread_source":"user"}),
+            serde_json::json!({"source":"vscode","thread_source":42}),
+        ] { assert!(!is_public_session(&metadata)); }
+    }
+
+    #[test]
     fn internal_reviews_never_enter_task_registry_but_real_tasks_still_do() {
         let root = tempfile::tempdir().unwrap();
         let now = 100000;
@@ -627,7 +668,9 @@ mod tests {
             ("guardian-thread", serde_json::json!({"thread_source":"guardian_review"})),
             // A real user task with the same display title must remain visible.
             ("user", serde_json::json!({"source":"cli"})),
-            ("worker", serde_json::json!({"source":{"subagent":{"other":"worker"}}})),
+            ("worker", serde_json::json!({"source":"vscode","thread_source":"agent_created_thread"})),
+            ("internal-worker", serde_json::json!({"source":{"subagent":{"other":"worker"}}})),
+            ("internal-future", serde_json::json!({"source":"vscode","thread_source":"future_internal_kind"})),
         ] {
             let mut payload = provenance;
             payload["id"] = serde_json::json!(id);
@@ -665,7 +708,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("large.jsonl");
         let mut file = File::create(&path).unwrap();
-        writeln!(file, "{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"large\"}}}}").unwrap();
+        writeln!(file, "{{\"type\":\"session_meta\",\"payload\":{{\"source\":\"cli\",\"session_id\":\"large\"}}}}").unwrap();
         let padding = format!("{{\"type\":\"padding\",\"payload\":\"{}\"}}\n", "x".repeat(4096));
         for _ in 0..40 { file.write_all(padding.as_bytes()).unwrap(); }
         writeln!(file, "{{\"timestamp\":1,\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\"}}}}").unwrap();
@@ -759,7 +802,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("rollout-live.jsonl");
         let now = 1_790_000_000;
-        fs::write(&path, format!("{{\"timestamp\":{now},\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"live\"}}}}\n{{\"timestamp\":{now},\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":\"核心任务\"}}}}\n")).unwrap();
+        fs::write(&path, format!("{{\"timestamp\":{now},\"type\":\"session_meta\",\"payload\":{{\"source\":\"cli\",\"session_id\":\"live\"}}}}\n{{\"timestamp\":{now},\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":\"核心任务\"}}}}\n")).unwrap();
         let mut file = OpenOptions::new().append(true).open(&path).unwrap();
         let old = UNIX_EPOCH + std::time::Duration::from_secs((now - 7200) as u64);
         file.set_modified(old).unwrap();
@@ -800,7 +843,11 @@ mod tests {
     #[test]
     fn silent_work_becomes_unconfirmed_not_completed() {
         let root = tempfile::tempdir().unwrap();
+        let header = "{\"type\":\"session_meta\",\"payload\":{\"source\":\"cli\",\"session_id\":\"live\"}}\n";
         fs::write(root.path().join("live.jsonl"), "{\"timestamp\":1000,\"type\":\"response_item\",\"payload\":{\"session_id\":\"live\",\"type\":\"message\",\"role\":\"user\",\"content\":\"long task\"}}\n").unwrap();
+        let path = root.path().join("live.jsonl");
+        let content = fs::read_to_string(&path).unwrap();
+        fs::write(&path, format!("{header}{content}")).unwrap();
         let mut watcher = RolloutWatcher::new(root.path().to_path_buf());
         assert_eq!(watcher.scan(1000)[0].status, TaskStatus::Running);
         assert_eq!(watcher.scan(2000)[0].status, TaskStatus::None);
@@ -808,7 +855,7 @@ mod tests {
 
     #[test]
     fn extracts_title_without_assigning_status() {
-        let input = r#"{"type":"session_meta","payload":{"session_id":"thread-1"}}
+        let input = r#"{"type":"session_meta","payload":{"source":"cli","session_id":"thread-1"}}
 {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"修复任务同步问题。补充测试"}]}}
 {"type":"event_msg","payload":{"type":"agent_reasoning","text":"working"}}"#;
         let watcher = RolloutWatcher::new(PathBuf::new());
@@ -867,14 +914,14 @@ mod tests {
         std::fs::write(
             &first,
             format!(
-                "{{\"timestamp\":{now},\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"a\"}}}}\n{{\"timestamp\":{now},\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":\"任务 A\"}}}}\n{{\"timestamp\":{now},\"type\":\"event_msg\",\"payload\":{{\"type\":\"agent_reasoning\"}}}}\n"
+                "{{\"timestamp\":{now},\"type\":\"session_meta\",\"payload\":{{\"source\":\"cli\",\"session_id\":\"a\"}}}}\n{{\"timestamp\":{now},\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":\"任务 A\"}}}}\n{{\"timestamp\":{now},\"type\":\"event_msg\",\"payload\":{{\"type\":\"agent_reasoning\"}}}}\n"
             ),
         )
         .unwrap();
         std::fs::write(
             &second,
             format!(
-                "{{\"timestamp\":{now},\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"b\"}}}}\n{{\"timestamp\":{now},\"type\":\"event_msg\",\"payload\":{{\"type\":\"approval_required\",\"reason\":\"等待确认\"}}}}\n"
+                "{{\"timestamp\":{now},\"type\":\"session_meta\",\"payload\":{{\"source\":\"cli\",\"session_id\":\"b\"}}}}\n{{\"timestamp\":{now},\"type\":\"event_msg\",\"payload\":{{\"type\":\"approval_required\",\"reason\":\"等待确认\"}}}}\n"
             ),
         )
         .unwrap();
